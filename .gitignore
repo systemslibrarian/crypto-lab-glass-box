@@ -1,0 +1,14 @@
+# The demo-authoring template: a local copy of crypto-lab/audits/_MASTER-TEMPLATE.md,
+# deliberately NOT tracked. A committed copy inside a lab ages silently and becomes a
+# second, wrong standard — one was deleted from the catalog root on 2026-08-20 still
+# claiming to be the single source of truth while carrying no dependency automation
+# and three outdated action pins. Re-copy it when you need a fresh one.
+CRYPTO-LAB-TEMPLATE*.md
+
+# Build and test output.
+node_modules
+dist
+.DS_Store
+*.local
+playwright-report
+test-results
