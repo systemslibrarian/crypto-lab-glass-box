@@ -939,6 +939,35 @@ test.describe('reproducible run links', () => {
     await expect(page.locator('#share-status')).toContainText('not secret');
   });
 
+  test('a seed reproduces the RUN, not just the instance -- and no seed does not', async ({ page }) => {
+    // What the link promises. A seed that pinned the encodings but not the
+    // plaintexts traced under them would give the same program and a different
+    // result, which is not what "reproducible" means to anyone reading it.
+    //
+    // Margins are the sharp instrument here: a margin is (peak - runner-up) /
+    // peak over the measured trace bits, so two runs agreeing on all sixteen to
+    // the printed percent is not something a different set of plaintexts does.
+    const measure = async (seed: string): Promise<string[]> => {
+      await boot(page);
+      if (seed.length > 0) await setSeed(page, seed);
+      await build(page, 'none');
+      await trace(page, 256);
+      await attack(page, 'input', ['sbox', 'inverse']);
+      return page.locator('#byte-strip .byte-margin').allInnerTexts();
+    };
+
+    const first = await measure('repro-seed');
+    const second = await measure('repro-seed');
+    expect(first).toHaveLength(16);
+    expect(second).toEqual(first);
+
+    // And the unseeded path really is unseeded, so the label on it is not a
+    // formality. Sixteen margins agreeing by chance is not a thing that happens.
+    const loose = await measure('');
+    expect(loose).toHaveLength(16);
+    expect(loose).not.toEqual(first);
+  });
+
   test('opening a link reproduces the settings it carried', async ({ page }) => {
     await page.goto(
       './?seed=shared-seed&key=2b7e151628aed2a6abf7158809cf4f3c&placement=compiled-in&traces=768&surface=input&targets=sbox-output,inverse&bits=3&score=extremity',
@@ -972,6 +1001,12 @@ test.describe('the sweep', () => {
   test('measures all seven combinations and ends on the state the claim is about', async ({ page }) => {
     test.setTimeout(600_000);
     await boot(page);
+    // A seed, like every other act-5 test here. Without one the sweep builds
+    // `sweep-${Date.now()}` -- a different instance on every run -- and the
+    // comparison below is then an assertion about an unrepeatable measurement.
+    // It failed in CI exactly that way: 15 bytes against 16 at 256 traces, on
+    // an instance no one could look at afterwards.
+    await setSeed(page, 'act5-fixed');
     await page.fill('#traces', '256');
     await page.locator('#sweep').click();
     await expect(page.locator('#sweep-status')).toContainText('Measured all 7 combinations', { timeout: 420_000 });
@@ -991,7 +1026,12 @@ test.describe('the sweep', () => {
     }
     // One seed across the sweep, so this is a comparison of placements rather
     // than of seven unrelated instances -- and the headline result follows.
+    // A seed now pins the traced plaintexts too, so this is reproducible rather
+    // than merely likely.
     await expect(page.locator('#compiled-in-comparison')).toHaveAttribute('data-comparison', 'identical');
+    // The outcome that would actually contradict Bos et al. 5.4 has its own
+    // state, so a failure here cannot quietly read as the benign one.
+    await expect(page.locator('#compiled-in-comparison')).not.toHaveAttribute('data-comparison', 'refuted');
 
     // It leaves the page on the state the negative claim is about, with the
     // claim and its four green checks on screen.

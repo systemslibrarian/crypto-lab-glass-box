@@ -618,7 +618,7 @@ function buildSection(): HTMLElement {
       'seed',
       'Encoding seed (optional)',
       seedInput,
-      'Leave it empty for crypto.getRandomValues. A seed reproduces the exact instance — encodings, mixing bijections and all — which makes it reproducible and therefore not secret.',
+      'Leave it empty for crypto.getRandomValues. A seed pins the whole run: every encoding and mixing bijection, and the plaintexts the attack is given to work from, so the same seed gives the same recovery down to the confidence margins. That is reproducible and therefore not secret. Without one, the instance AND the plaintexts are fresh each time, so two runs of the same settings can differ by a byte or two.',
     ),
     radioGroup('placement', 'Where the external encodings live', PLACEMENT_OPTIONS, state.placement, (value) => {
       // Re-selecting what is already selected must not retire a fresh verdict.
@@ -1450,13 +1450,32 @@ function renderLog(): void {
   const plain = state.log.find((r) => r.placement === 'none' && r.surface === 'input');
   const compiled = state.log.find((r) => r.placement === 'compiled-in' && r.surface === 'input');
   if (plain && compiled) {
+    /*
+     * Three outcomes, not two, because "the counts differ" and "the encoding
+     * stopped the attack" are not the same event and only the second one would
+     * contradict Bos et al. section 5.4 as this lab reproduces it.
+     *
+     * An unseeded run draws fresh plaintexts for each placement, so two runs
+     * that both recover the key can still land a byte or two apart. Reporting
+     * that as THE TWO RUNS DIFFER and stopping there invited the reader to
+     * conclude the headline claim had just failed in front of them. It had not.
+     * A seeded instance pins the plaintexts too, and then the counts are equal
+     * or something is genuinely wrong.
+     */
     const same = plain.correctCount === compiled.correctCount;
+    const stopped = plain.correctCount >= 4 && compiled.correctCount < 4;
+    const outcome = stopped ? 'refuted' : same ? 'identical' : 'different';
+    const head = stopped
+      ? 'THE ENCODING STOPPED THE ATTACK'
+      : same
+        ? 'THE ENCODING CHANGED NOTHING'
+        : 'THE ENCODING DID NOT SAVE IT';
     logHost.append(
       el(
         'div',
-        { class: 'verdict-row', id: 'compiled-in-comparison', 'data-comparison': same ? 'identical' : 'different' },
+        { class: 'verdict-row', id: 'compiled-in-comparison', 'data-comparison': outcome },
         [
-          verdict(same ? 'alarm' : 'warn', same ? 'THE ENCODING CHANGED NOTHING' : 'THE TWO RUNS DIFFER'),
+          verdict(stopped ? 'ok' : 'alarm', head),
           el('span', { class: 'verdict-detail' }, [
             `Compiling the external encodings in grew the program from ${count(plain.tables)} tables (${bytesHuman(
               plain.bytes,
@@ -1464,7 +1483,14 @@ function renderLog(): void {
               plain.traceBits,
             )} bits to ${count(compiled.traceBits)}. The attack recovered ${plain.correctCount} bytes before and ${
               compiled.correctCount
-            } after.`,
+            } after.` +
+              (stopped
+                ? ' That is the one result on this page that would contradict what it claims, and it is being shown rather than hidden. Re-run it with a seed before believing it: an unseeded run is a different instance each time.'
+                : same
+                  ? ''
+                  : ` The counts are not equal, and that is sampling, not protection: at ${count(
+                      plain.traces,
+                    )} traces a byte near the decision boundary can fall either way. The claim is that the encoding does not stop the attack, and on both sides of this comparison it did not. Put a seed in the instance to pin the plaintexts and the two runs become comparable byte for byte.`),
           ]),
         ],
       ),
@@ -2493,7 +2519,7 @@ function shareControl(): HTMLElement {
         .catch(() => done(false));
     }),
     el('p', { class: 'hint' }, [
-      'Reproducibility is the point: a seed pins every encoding and mixing bijection, so the same link gives the same instance, the same traces and the same recovery.',
+      'Reproducibility is the point: a seed pins every encoding and mixing bijection AND the plaintexts traced under them, so the same link gives the same instance, the same traces and the same recovery. A link with no seed in it carries the settings only, and the run it produces will be a different instance.',
     ]),
   ]);
 }

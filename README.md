@@ -303,10 +303,10 @@ per cent of each other.
 
 ## Build & Verify
 
-**170 tests, all executed, none skipped.**
+**171 tests, all executed, none skipped.**
 
 - **121 unit tests** (Vitest, `src/**/*.test.ts`).
-- **46 claims tests** (Playwright, `e2e/claims.spec.ts`) — checking that the page
+- **47 claims tests** (Playwright, `e2e/claims.spec.ts`) — checking that the page
   tells the truth, by comparing values the page itself printed and re-deriving its
   claims from what is on screen.
 - **3 accessibility tests** (Playwright + `@axe-core/playwright`,
@@ -348,6 +348,11 @@ per cent of each other.
 - **A run link round-trips** — the settings it carries are reapplied, a key the
   reader typed is not in it, and a link full of nonsense falls back to the
   shipped defaults rather than trusting any of it.
+- **A seed reproduces the run, not just the instance** — two runs of the same
+  seed agree on all sixteen confidence margins, and two runs with no seed do
+  not. The seed pins the encodings, the mixing bijections AND the plaintexts
+  the attack is given, because a link that reproduced the program but not the
+  result would not be reproducing anything a reader cares about.
 - **BGE step A1 is correct, not merely self-consistent** — the recovered map
   composed with the true encoding is verified to be GF(2)-affine over all 2^16
   pairs, on four rounds and four columns; and a one-swap perturbation of the

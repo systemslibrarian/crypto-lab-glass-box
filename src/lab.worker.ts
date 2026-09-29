@@ -78,6 +78,13 @@ interface Session {
   readonly key: Uint8Array;
   readonly lastRoundKey: Uint8Array;
   readonly placement: EncodingPlacement;
+  /**
+   * The seed this instance was built from, empty for an unseeded one. Kept so
+   * the TRACE can be drawn reproducibly too: a seed that pinned the program but
+   * not the plaintexts fed to it would make "the same link gives the same
+   * recovery" false, because the recovery is measured off those plaintexts.
+   */
+  readonly seed: string;
 }
 
 let session: Session | null = null;
@@ -179,6 +186,7 @@ async function handleBuild(id: number, keyHex: string, placement: EncodingPlacem
     key,
     lastRoundKey: new Uint8Array(expandKey(key).subarray(160, 176)),
     placement,
+    seed,
   };
   traceSet = null;
 
@@ -234,7 +242,23 @@ function handleTrace(id: number, traces: number): void {
     );
   }
   const startedAt = Date.now();
-  const inputs = systemRng().bytes(traces * 16);
+  /*
+   * The attacker's chosen plaintexts. Seeded when the instance is, so a seeded
+   * run really is one run: same program, same plaintexts, same recovery, which
+   * is what the page and the share link both say.
+   *
+   * The stream is derived from seed + '/traces' rather than continuing the one
+   * that built the encodings. Domain separation costs nothing here and keeps
+   * the two uses of a seed from ever being the same bytes -- a trace input that
+   * happened to be encoding material would be a hard thing to notice and an
+   * embarrassing thing to explain.
+   *
+   * It does not make the attack easier. DCA needs plaintexts it KNOWS, not
+   * plaintexts that are unpredictable; where they came from is not an input to
+   * the statistic. An unseeded instance still draws them from the system RNG.
+   */
+  const inputs =
+    current.seed.length > 0 ? seededRng(`${current.seed}/traces`).bytes(traces * 16) : systemRng().bytes(traces * 16);
   const set = collectTraces(current.network, inputs, traces, (done) => {
     post({ kind: 'progress', id, phase: 'running traced encryptions', done, total: traces });
   });
