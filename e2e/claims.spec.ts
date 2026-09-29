@@ -650,6 +650,41 @@ test.describe('failure paths: the page names the actual cause', () => {
     await expect(page.locator('#trace-error')).toBeEmpty();
   });
 
+  test('TRACE_BUDGET_EXCEEDED, on the placement whose program is twice the size', async ({ page }) => {
+    // The guard is on BYTES, not on the trace count, and it bites on exactly one
+    // placement -- which is the reason it exists and what makes it worth showing.
+    await boot(page);
+    await build(page, 'none');
+    await trace(page, 2048);
+    await expect(page.locator('#trace-error')).toBeEmpty();
+
+    await build(page, 'compiled-in');
+    await page.fill('#traces', '2048');
+    await page.locator('#trace').click();
+    await expect(page.locator('#trace-error')).toContainText('TRACE_BUDGET_EXCEEDED');
+    await expect(page.locator('#trace-error')).toContainText('7 MB budget');
+    await expect(page.locator('#trace-error')).toContainText('computed before anything is allocated');
+    await expect(page.locator('#traces')).toHaveAttribute('aria-invalid', 'true');
+
+    // ...and the same placement accepts a count the budget does allow.
+    await trace(page, 1024);
+    await expect(page.locator('#trace-error')).toBeEmpty();
+  });
+
+  test('NO_PROGRAM_BUILT, after a build that failed', async ({ page }) => {
+    await boot(page);
+    await page.fill('#key-hex', 'nonsense');
+    await page.locator('#build').click();
+    await expect(page.locator('#key-error')).toContainText('KEY_HEX_MALFORMED');
+    // There is now no program, so the acts that need one must say so by name
+    // rather than silently doing nothing.
+    await page.locator('#trace').click();
+    await expect(page.locator('#trace-error')).toContainText('NO_PROGRAM_BUILT');
+    await page.locator('#run-bge').click();
+    await expect(page.locator('#bge-error')).toContainText('NO_PROGRAM_BUILT');
+    await expect(page.locator('#bge-error')).toContainText('reads its tables');
+  });
+
   test('NO_TRACES_RECORDED and NO_HYPOTHESIS_SELECTED', async ({ page }) => {
     await boot(page);
     await page.locator('#run-dca').click();
@@ -684,6 +719,40 @@ test.describe('failure paths: the page names the actual cause', () => {
     ]) {
       expect(table, code).toContain(code);
     }
+  });
+});
+
+test.describe('the sweep', () => {
+  test('measures all seven combinations and ends on the state the claim is about', async ({ page }) => {
+    test.setTimeout(600_000);
+    await boot(page);
+    await page.fill('#traces', '256');
+    await page.locator('#sweep').click();
+    await expect(page.locator('#sweep-status')).toContainText('Measured all 7 combinations', { timeout: 420_000 });
+
+    // Seven rows, one per (placement, side), each carrying what it measured.
+    const rows = page.locator('#placement-log table.matrix tbody tr');
+    await expect(rows).toHaveCount(7);
+    const text = (await page.locator('#placement-log').innerText()).replace(/\s+/g, ' ');
+    for (const label of [
+      'no external encodings',
+      'compiled into the program',
+      'remote, both sides',
+      'remote, input side only',
+      'remote, output side only',
+    ]) {
+      expect(text, label).toContain(label);
+    }
+    // One seed across the sweep, so this is a comparison of placements rather
+    // than of seven unrelated instances -- and the headline result follows.
+    await expect(page.locator('#compiled-in-comparison')).toHaveAttribute('data-comparison', 'identical');
+
+    // It leaves the page on the state the negative claim is about, with the
+    // claim and its four green checks on screen.
+    await expect(page.locator('input[name="placement"]:checked')).toHaveValue('remote-both');
+    await expect(page.locator('#dca-verdict .pill-text')).toContainText('NO RECOVERY');
+    await expect(page.locator('#neg-fixture [data-negative-claim="NEG-1"]')).toBeVisible();
+    await expect(page.locator('#neg-fixture [data-check="pass"]')).toHaveCount(4);
   });
 });
 

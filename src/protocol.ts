@@ -36,20 +36,34 @@ export type FailureCode = LabFailureCode | BgeFailureCode;
 
 export const MIN_TRACES = 8;
 /**
- * The cap, and the reason for it.
+ * The cap on the trace COUNT, and the reason for it.
  *
  * DCA's scoring cost is almost flat in the trace count -- the convolution is over
  * the 256 byte values, not over the traces -- so the binding constraint is the
- * trace buffer, which is (bits per trace) x ceil(N / 32) x 4 bytes. With the
- * external encodings compiled in a trace is 32,128 bits, so N = 2,048 needs about
- * 8.4 MB and N = 8,192 would need 33 MB before the attack starts. 2,048 also
- * comfortably covers the 2,000 traces Bos et al. report using, which is the
- * figure a reader is most likely to want to reproduce.
+ * trace buffer rather than the attack. 2,048 comfortably covers the 2,000 traces
+ * Bos et al. report using, which is the figure a reader is most likely to want to
+ * reproduce.
  */
 export const MAX_TRACES = 2048;
 export const DEFAULT_TRACES = 384;
-/** The budget `TRACE_BUDGET_EXCEEDED` guards, in bytes. */
-export const TRACE_BUDGET_BYTES = 24 * 1024 * 1024;
+
+/**
+ * The cap on the trace BYTES, which is a different quantity and bites first.
+ *
+ * A trace buffer is (bits per trace) x ceil(N / 32) x 4, and the bits per trace
+ * depend on how big the PROGRAM is: 16,256 with no external encodings, 24,192
+ * with them held remotely on both sides, and 32,128 with them compiled in, because
+ * the program then contains the encoder, its inverse, and both of theirs. So the
+ * same trace count costs twice as much in one placement as in another, and a cap
+ * expressed only in traces would be either wrong or needlessly small.
+ *
+ * At 7 MB this guard is live rather than decorative: the plain, remote-both and
+ * one-sided placements all reach 2,048 traces (4.03, 5.97 and 5.00 MB), and the
+ * compiled-in placement is refused above 1,792 (7.91 MB at 2,048). That the guard
+ * bites on exactly the placement whose program is twice the size is the thing
+ * worth noticing, so the refusal says the size out loud.
+ */
+export const TRACE_BUDGET_BYTES = 7 * 1024 * 1024;
 
 export interface BuildRequest {
   readonly kind: 'build';

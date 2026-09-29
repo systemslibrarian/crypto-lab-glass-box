@@ -230,10 +230,10 @@ npm run test:claims  # does the page tell the truth?
 
 ## Build & Verify
 
-**154 tests, all executed, none skipped.**
+**157 tests, all executed, none skipped.**
 
 - **117 unit tests** (Vitest, `src/**/*.test.ts`).
-- **34 claims tests** (Playwright, `e2e/claims.spec.ts`) — checking that the page
+- **37 claims tests** (Playwright, `e2e/claims.spec.ts`) — checking that the page
   tells the truth, by comparing values the page itself printed and re-deriving its
   claims from what is on screen.
 - **3 accessibility tests** (Playwright + `@axe-core/playwright`,
@@ -309,8 +309,11 @@ is what the page waits for before reporting anything.
 The attack's cost is almost flat in the trace count, which is why 2,048 traces are
 as interactive as 128: the scoring is an XOR-convolution over the 256 byte values
 rather than a pass over the traces. The binding constraint is the trace buffer,
-and the page computes its size before allocating it and refuses anything over
-24 MB by name.
+which is one bit per sample per trace — and how many samples a trace has depends
+on how big the program is, so the same trace count costs twice as much with the
+external encodings compiled in as without them. The page computes the size before
+allocating anything and refuses over 7 MB by name, which the compiled-in
+placement reaches first, at about 1,800 traces where the others reach 2,048.
 
 ---
 

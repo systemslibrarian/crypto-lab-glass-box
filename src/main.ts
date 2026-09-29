@@ -760,9 +760,7 @@ function traceSection(): HTMLElement {
         'traces',
         'or type an exact number',
         traceNumber,
-        `Between ${MIN_TRACES} and ${count(MAX_TRACES)}. The cap is the trace buffer, not the attack: the buffer is one bit per sample per trace, and this lab refuses anything over ${bytesHuman(
-          TRACE_BUDGET_BYTES,
-        )}. ${count(MAX_TRACES)} also covers the 2,000 traces Bos et al. report using.`,
+        `Between ${MIN_TRACES} and ${count(MAX_TRACES)}, which covers the 2,000 traces Bos et al. report using. There is a second cap, on BYTES rather than traces: a buffer is one bit per sample per trace, and how many samples a trace has depends on how big the program is. This lab computes the size before allocating anything and refuses over ${bytesHuman(TRACE_BUDGET_BYTES)} \u2014 which the compiled-in placement reaches first, because its program is twice the size.`,
       ),
       button('trace', 'Trace it', 'primary', () => void runTrace()),
     ]),
