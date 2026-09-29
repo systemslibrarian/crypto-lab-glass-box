@@ -153,9 +153,10 @@ gets wrong if you are not careful.**
 - **A confident-looking answer can still be wrong.** The margin between a byte's
   best and second-best candidate is computed without the key, so it is the
   confidence an attacker really has — and on this generator every byte above a
-  0.15 margin was correct in all fifty measured input-side runs. That is a
-  measurement, not a guarantee: in the remote-both state, where the attack is at
-  chance, a spurious high margin has been observed, and it was wrong.
+  0.15 margin was correct in all fifty measured input-side runs (five instances,
+  five configurations, two trace counts). That is a measurement, not a guarantee:
+  in one remote-both output-side run, where the attack is at chance, a byte
+  cleared that margin anyway and was wrong.
 - **The attack is asymmetric, and this is a lab-original measurement rather than a
   figure from any paper.** Attacking the output side recovers only part of the
   last round key and does not complete. Chow's first-round tables are 8 -> 32, so a
