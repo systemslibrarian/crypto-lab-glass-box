@@ -11,6 +11,7 @@
  */
 
 import type { BgeFailureCode } from './attack/bge.js';
+import type { Distinguisher } from './attack/dca.js';
 import type { AttackSurface, DcaTarget, EncodingPlacement, TableGroup, TraceWindow } from './wb/types.js';
 
 export const LAB_FAILURE_CODES = [
@@ -83,6 +84,7 @@ export interface DcaRunRequest {
   readonly surface: AttackSurface;
   readonly targets: readonly DcaTarget[];
   readonly bits: readonly number[];
+  readonly distinguisher: Distinguisher;
   /** Which key byte the 256-curve plot should be computed for, or null for none. */
   readonly curveByte: number | null;
 }
@@ -165,6 +167,7 @@ export interface DcaByteReport {
   readonly peakSample: number;
   readonly peakTarget: DcaTarget;
   readonly peakBit: number;
+  readonly bestDelta: number;
   readonly correct: boolean;
   readonly truth: number;
   readonly peaks: Float32Array;
@@ -180,6 +183,18 @@ export interface DcaReport {
   readonly traces: number;
   readonly targets: readonly DcaTarget[];
   readonly bits: readonly number[];
+  readonly distinguisher: Distinguisher;
+  /** The (target, bit) pairs scored, in the order `trueRanks` uses. */
+  readonly combos: readonly { readonly target: DcaTarget; readonly bit: number }[];
+  /**
+   * Rank of the TRUE byte under each combo, `[keyByte][combo]`, 1 = largest
+   * difference of means. Consulted after the attack committed (invariant I3),
+   * and the direct reproduction of Bos et al.'s Tables 1 and 2 on the reader's
+   * own instance.
+   */
+  readonly trueRanks: Int32Array;
+  /** How many of those ranks sit at 1 or 256 rather than anywhere in between. */
+  readonly extremeRanks: number;
   readonly elapsedMs: number;
   readonly bytes: readonly DcaByteReport[];
   /** What the attack committed to, before any comparison. */

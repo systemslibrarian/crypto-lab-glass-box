@@ -39,6 +39,13 @@ export default defineConfig({
     colorScheme: 'dark', // dark is the only theme
   },
   projects: [
+    /**
+     * NOT a gate. `npm run og` re-renders the social preview card from a live
+     * run of the page, so the picture a link preview shows cannot drift away
+     * from what the lab actually does. CI names `test:a11y` and `test:claims`
+     * explicitly and never runs this one.
+     */
+    { name: 'og', testMatch: /ogshot\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
     { name: 'a11y', testMatch: /a11y\.spec\.ts/, use: { ...devices['Desktop Chrome'], colorScheme: 'dark' } },
     { name: 'claims', testMatch: /claims\.spec\.ts/, use: { ...devices['Desktop Chrome'], colorScheme: 'dark' } },
   ],

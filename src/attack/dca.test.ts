@@ -134,9 +134,94 @@ describe('the fast and direct scorers are the same attack', () => {
         expect(fast.bytes[i].peakSample).toBe(direct.bytes[i].peakSample);
         expect(fast.bytes[i].peakBit).toBe(direct.bytes[i].peakBit);
         expect([...fast.bytes[i].peaks]).toEqual([...direct.bytes[i].peaks]);
+        expect(fast.bytes[i].bestDelta).toBeCloseTo(direct.bytes[i].bestDelta, 12);
       }
+      // The per-combo ranks are what the extremity distinguisher is defined on,
+      // so they have to agree too -- a rank is a total order and a single
+      // swapped pair would change a recovered byte.
+      expect([...fast.ranks]).toEqual([...direct.ranks]);
     }
   }, 300_000);
+});
+
+/**
+ * The rank-extremity distinguisher, and the observation it rests on.
+ *
+ * Bos et al. section 5.4: a target bit that does not leak very often ranks the
+ * TRUE byte last rather than at a random position. These tests measure whether
+ * that reproduces on this generator, and whether it is strong enough to recover
+ * a key on its own -- both of which the page claims.
+ */
+describe('rank extremity (Bos et al. section 5.4)', () => {
+  const ALL_BITS_LOCAL = [0, 1, 2, 3, 4, 5, 6, 7];
+
+  it('ranks the true byte at one extreme far more often than chance', () => {
+    const { request, key } = mount('none', 'rank', 2048);
+    const result = runDca({
+      ...request,
+      targets: ['sbox-output', 'inverse'],
+      bits4: ALL_BITS_LOCAL,
+      distinguisher: 'peak',
+    });
+    const combos = result.combos.length;
+    expect(combos).toBe(16);
+    let extreme = 0;
+    let middle = 0;
+    for (let m = 0; m < 16; m++) {
+      for (let c = 0; c < combos; c++) {
+        const rank = result.ranks[(m * combos + c) * 256 + key[m]];
+        expect(rank).toBeGreaterThanOrEqual(1);
+        expect(rank).toBeLessThanOrEqual(256);
+        if (rank === 1 || rank === 256) extreme++;
+        else middle++;
+      }
+    }
+    // Uniform would put about 2 of 256 at the extremes; measured here it is the
+    // large majority. The threshold is deliberately far below what was measured
+    // (231 of 256 over five instances) so the test is about the phenomenon
+    // rather than about one instance.
+    expect(extreme + middle).toBe(16 * 16);
+    expect(extreme).toBeGreaterThan(0.6 * (extreme + middle));
+  }, 180_000);
+
+  it('recovers the whole key on its own at 2,048 traces', () => {
+    for (const seed of ['e0', 'e1']) {
+      const { request, key } = mount('none', seed, 2048);
+      const result = runDca({
+        ...request,
+        targets: ['sbox-output', 'inverse'],
+        bits4: ALL_BITS_LOCAL,
+        distinguisher: 'extremity',
+      });
+      expect(result.distinguisher).toBe('extremity');
+      expect(judgeRecovery(result.recovered, key).correctCount, seed).toBe(16);
+      // And it is not a near-tie: the winner stands clear of the field.
+      for (const b of result.bytes) expect(b.margin, `${seed} byte ${b.index}`).toBeGreaterThan(0.1);
+    }
+  }, 300_000);
+
+  it('...and needs those traces: at 384 it is measurably worse than the peak reading', () => {
+    // The honest other half. A weaker signal needs more of it, and the page says
+    // so rather than offering the distinguisher as a free upgrade.
+    const { request, key } = mount('none', 'e2', 384);
+    const base = { ...request, targets: ['sbox-output', 'inverse'] as DcaTarget[], bits4: ALL_BITS_LOCAL };
+    const byPeak = judgeRecovery(runDca({ ...base, distinguisher: 'peak' }).recovered, key).correctCount;
+    const byExtremity = judgeRecovery(runDca({ ...base, distinguisher: 'extremity' }).recovered, key).correctCount;
+    expect(byPeak).toBeGreaterThanOrEqual(14);
+    expect(byExtremity).toBeLessThan(byPeak);
+  }, 300_000);
+
+  it('the two distinguishers read the same scores and disagree only in how they combine them', () => {
+    const { request } = mount('none', 'e3', 256);
+    const base = { ...request, targets: ['sbox-output'] as DcaTarget[], bits4: [0, 4] };
+    const a = runDca({ ...base, distinguisher: 'peak' });
+    const b = runDca({ ...base, distinguisher: 'extremity' });
+    // Same underlying measurement...
+    expect([...a.ranks]).toEqual([...b.ranks]);
+    // ...different combination, so the score arrays are in different units.
+    expect(a.bytes[0].peaks[a.bytes[0].guess]).toBeCloseTo(a.bytes[0].bestDelta, 12);
+    expect(b.bytes[0].peaks[b.bytes[0].guess]).toBeGreaterThan(1);
+  }, 180_000);
 });
 
 describe('dcaCurves', () => {

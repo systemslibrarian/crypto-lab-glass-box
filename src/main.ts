@@ -27,8 +27,8 @@ import {
   type TraceReport,
 } from './protocol.js';
 import { BGE_FAILURE_CODES, PUBLISHED_WORK_FACTORS } from './attack/bge.js';
-import { TARGET_LABELS } from './attack/dca.js';
-import type { AttackSurface, DcaTarget, EncodingPlacement } from './wb/types.js';
+import { TARGET_LABELS, type Distinguisher } from './attack/dca.js';
+import { ENCODING_PLACEMENTS, type AttackSurface, type DcaTarget, type EncodingPlacement } from './wb/types.js';
 import { createDiagram } from './ui/diagram.js';
 import {
   button,
@@ -118,6 +118,18 @@ interface LabState {
   surface: AttackSurface;
   inputTargets: DcaTarget[];
   bitChoice: 'all' | number;
+  distinguisher: Distinguisher;
+  /**
+   * Where the key in the field came from.
+   *
+   * The share link carries a key the PAGE chose and never one a reader typed.
+   * This lab's keys are demo values and it says so in three places, but "put
+   * whatever is in that text box into a URL somebody might paste into a chat"
+   * is not a thing a page should do on a reader's behalf. A seed is different:
+   * it is reproducible by design, the page already labels a seeded instance as
+   * not secret, and reproducibility is the whole point of the link.
+   */
+  keyOrigin: 'default' | 'generated' | 'typed';
   bgeRound: number;
   bgeColumn: number;
   build: BuildReport | null;
@@ -137,6 +149,18 @@ interface LabState {
    * that did nothing. The claims suite waits on these.
    */
   runs: { build: number; trace: number; dca: number; bge: number };
+  /**
+   * Which guided stages the reader has COMPLETED.
+   *
+   * Recorded when each one happens, never re-derived from the current state --
+   * and that distinction is load-bearing rather than pedantic. Deriving it was
+   * the first version, and it regressed: after the act 5 sweep the page ends on
+   * the placement where DCA recovers nothing, so a "has a key been recovered?"
+   * test went false again and the rail unticked a stage the reader had really
+   * finished. Moving the encodings does not un-recover the key they already
+   * took out.
+   */
+  stagesDone: Record<StageId, boolean>;
   /** One row per (placement, surface) the reader has actually run. */
   log: {
     placement: EncodingPlacement;
@@ -163,6 +187,8 @@ const state: LabState = {
   surface: 'input',
   inputTargets: ['sbox-output'],
   bitChoice: 'all',
+  distinguisher: 'peak',
+  keyOrigin: 'default',
   bgeRound: 1,
   bgeColumn: 0,
   build: null,
@@ -172,6 +198,7 @@ const state: LabState = {
   inspectGuess: 'recovered',
   retired: null,
   runs: { build: 0, trace: 0, dca: 0, bge: 0 },
+  stagesDone: { build: false, trace: false, recover: false, boundary: false, tables: false },
   log: [],
   bge: null,
 };
@@ -214,7 +241,7 @@ function hero(): HTMLElement {
     el('aside', { class: 'cl-hero-why', 'aria-label': 'Why it matters' }, [
       el('span', { class: 'cl-hero-why-label' }, ['WHY IT MATTERS']),
       el('p', { class: 'cl-hero-why-text' }, [
-        'Software that has to decrypt on hardware its owner controls — a streaming client, a payment app, a licence check — ships the key inside the binary. White-box cryptography is the attempt to make that survivable. Chow’s design is the one everything else is built on, and two published attacks take the key out of it: one needs a few hundred execution traces, the other needs none.',
+        'Software that has to decrypt on hardware its owner controls — a streaming client, a payment app, a licence check — ships the key inside the binary. White-box cryptography is the attempt to make that survivable. Chow’s design is the one everything else is built on, and it is broken from two directions: a statistical attack that needs a few hundred execution traces, and an algebraic one that needs none at all.',
       ]),
     ]),
   ]);
@@ -246,27 +273,42 @@ function scopeSection(): HTMLElement {
   );
   const body = panel('scope-panel');
   body.append(
-    el('h3', {}, ['Real']),
-    list([
-      'The cipher. AES-128 exactly as FIPS 197 defines it, with the S-box assembled from the GF(2⁸) inverse and the section 5.1.1 affine map rather than pasted from a table.',
-      'The white-box construction. Chow’s table network at full size: T-boxes with the round key folded in, Tyᵢ tables for MixColumns, nibble XOR tables, random 4-bit internal encodings on every wire, and the 8×8 and 32×32 GF(2) mixing bijections of his section 3.2. Nothing is left out to make a picture simpler.',
-      'The check. Every program this page builds is compared against WebCrypto — an independent AES — on random blocks, and against the FIPS 197 Appendix C.1 vector, before you are told it works.',
-      'The attack. Difference of means over a software execution trace, exactly the distinguisher Bos et al. use, scoring all 4,096 hypotheses with no knowledge of the encodings.',
-      'The algebra. Step A1 of Billet, Gilbert and Ech-Chatbi’s attack, run live on the tables.',
+    el('p', { id: 'scope-summary' }, [
+      el('strong', {}, ['Real:']),
+      ' the cipher, the white-box construction at full size, both attacks, and the check against an independent AES. ',
+      el('strong', {}, ['Not the real thing:']),
+      ' the trace comes from the page instrumenting itself rather than from a debugger attached to somebody else\u2019s binary, and the external encodings are the linear form Chow specifies. ',
+      el('strong', {}, ['Not production crypto:']),
+      ' it runs entirely in your browser, the key lives as long as the tab does, and it exists to be broken.',
     ]),
-    el('h3', {}, ['Not the real thing']),
-    list([
-      'The trace comes from the program instrumenting itself. Real DCA captures the same kind of data from a foreign binary with dynamic binary instrumentation — Intel PIN, Valgrind, a debugger — which a browser cannot run. What is recorded here is the output of every table lookup, in execution order, which is the quantity those tools give you.',
-      'The external encodings are 128×128 GF(2) mixing bijections. Chow specifies external encodings as mixing bijections on the whole block, so this is one of the forms he gives; an arbitrary bijection on 128 bits is not a thing that can be stored.',
-      'This is not an obfuscated commercial white-box. No control-flow flattening, no anti-debug, no masking. Those raise the cost of getting a trace; the published attacks assume you got one.',
+    el('p', { class: 'hint' }, [
+      'The detail is one click away, and each caveat also appears beside the act it applies to \u2014 the tracing caveat beside the trace, the measured recovery rates beside the attack, the external-encoding scope beside the placement experiment, and what BGE does and does not run beside BGE.',
     ]),
-    el('h3', {}, ['What it does not prove']),
-    list([
-      'Nothing here is a statement about white-box schemes in general. Every result on this page is about the constructions this page builds and the papers it cites.',
-      'It does not show that wider encodings would be safe. Rivain and Wang broke encodings wider than 4 bits, including a byte-encoded implementation that plain DCA had failed on. Nibble width is why FIRST-ORDER DCA works here, not the boundary of the attack family.',
-      'A recovery that fails is not a proof of security. It is one measurement, of one instance, at one trace count, with one distinguisher.',
-      'The recovery rates this page reports were measured on this generator. They are not properties of Chow’s construction, and they are not the figures from any paper. Where a paper’s figure appears it is attributed.',
-    ]),
+    details('What exactly is real, what is not, and what none of it proves', (out) => {
+      out.append(
+        el('h4', {}, ['Real']),
+        list([
+          'The cipher. AES-128 exactly as FIPS 197 defines it, with the S-box assembled from the GF(2⁸) inverse and the section 5.1.1 affine map rather than pasted from a table.',
+          'The white-box construction. Chow’s table network at full size: T-boxes with the round key folded in, Tyᵢ tables for MixColumns, nibble XOR tables, random 4-bit internal encodings on every wire, and the 8×8 and 32×32 GF(2) mixing bijections of his section 3.2. Nothing is left out to make a picture simpler.',
+          'The check. Every program this page builds is compared against WebCrypto — an independent AES — on random blocks, and against the FIPS 197 Appendix C.1 vector, before you are told it works.',
+          'The attack. Difference of means over a software execution trace, exactly the distinguisher Bos et al. use, scoring all 4,096 hypotheses with no knowledge of the encodings.',
+          'The algebra. Step A1 of Billet, Gilbert and Ech-Chatbi’s attack, run live on the tables.',
+        ]),
+        el('h4', {}, ['Not the real thing']),
+        list([
+          'The trace comes from the program instrumenting itself. Real DCA captures the same kind of data from a foreign binary with dynamic binary instrumentation — Intel PIN, Valgrind, a debugger — which a browser cannot run. What is recorded here is the output of every table lookup, in execution order, which is the quantity those tools give you.',
+          'The external encodings are 128×128 GF(2) mixing bijections. Chow specifies external encodings as mixing bijections on the whole block, so this is one of the forms he gives; an arbitrary bijection on 128 bits is not a thing that can be stored.',
+          'This is not an obfuscated commercial white-box. No control-flow flattening, no anti-debug, no masking. Those raise the cost of getting a trace; the published attacks assume you got one.',
+        ]),
+        el('h4', {}, ['What it does not prove']),
+        list([
+          'Nothing here is a statement about white-box schemes in general. Every result on this page is about the constructions this page builds and the papers it cites.',
+          'It does not show that wider encodings would be safe. Rivain and Wang broke encodings wider than 4 bits, including a byte-encoded implementation that plain DCA had failed on. Nibble width is why FIRST-ORDER DCA works here, not the boundary of the attack family.',
+          'A recovery that fails is not a proof of security. It is one measurement, of one instance, at one trace count, with one distinguisher.',
+          'The recovery rates this page reports were measured on this generator. They are not properties of Chow’s construction, and they are not the figures from any paper. Where a paper’s figure appears it is attributed and its section named.',
+        ]),
+      );
+    }),
     negClaim('scope'),
     el('p', { class: 'scope-note' }, [
       'Not production crypto. It runs entirely in your browser with no backend, the key lives for as long as the tab does and is never sent anywhere, and the whole point of it is to be broken. Do not use it to protect anything.',
@@ -361,6 +403,16 @@ const FIPS_KEY = '000102030405060708090a0b0c0d0e0f';
 const diagram = createDiagram();
 const buildOut = el('div', { id: 'build-out' });
 const buildStatus = status('build-status');
+/*
+ * Declared HERE, beside the act it belongs to, and not next to `shareControl`
+ * further down. It was down there once, after the line that mounts the acts,
+ * and the page did not fail: the production bundle turns a module-level `const`
+ * into a `var`, so instead of a temporal-dead-zone error the value was
+ * `undefined` and the DOM got the five characters "undefined" appended to act 2.
+ * A claims assertion now checks the whole page for that string, because the
+ * failure mode is silent.
+ */
+const shareStatus = status('share-status');
 const keyInput = el('input', {
   type: 'text',
   id: 'key-hex',
@@ -456,12 +508,14 @@ async function runBuild(): Promise<void> {
     state.dca = null;
     state.bge = null;
     state.runs.build += 1;
+    state.stagesDone.build = true;
     buildStatus.textContent = `Program #${state.runs.build} built in ${report.buildMs} ms.`;
     renderBuild(report);
     renderTrace(null);
     renderDca(null);
     renderBge(null);
     renderFixture();
+    renderGuide();
   } catch (error) {
     const err = error as Error & { code?: string };
     state.build = null;
@@ -555,6 +609,7 @@ function buildSection(): HTMLElement {
       field('key-hex', 'AES-128 key (32 hex digits)', keyInput, 'The default is the FIPS 197 Appendix C.1 key.'),
       button('generate-key', 'Generate a key', 'plain', () => {
         keyInput.value = randomKeyHex();
+        state.keyOrigin = 'generated';
         void runBuild();
       }),
     ]),
@@ -576,6 +631,8 @@ function buildSection(): HTMLElement {
     }),
     el('div', { class: 'control-row' }, [button('build', 'Build the program', 'primary', () => void runBuild())]),
     buildStatus,
+    shareControl(),
+    shareStatus,
   );
   const out = panel();
   out.append(el('h3', {}, ['What was built']), buildOut);
@@ -668,9 +725,11 @@ async function runTrace(): Promise<void> {
     // in memory now.
     state.retired = null;
     state.runs.trace += 1;
+    state.stagesDone.trace = true;
     traceStatus.textContent = `Run #${state.runs.trace}: recorded ${count(report.traces)} traces in ${report.elapsedMs} ms.`;
     renderTrace(report);
     renderDca(null);
+    renderGuide();
     await refreshHeatmap();
   } catch (error) {
     const err = error as Error & { code?: string };
@@ -817,6 +876,18 @@ const bitSelect = select(
     state.bitChoice = value === 'all' ? 'all' : Number(value);
   },
 );
+const distinguisherSelect = select(
+  'distinguisher-select',
+  [
+    { value: 'peak', label: 'the strongest correlation' },
+    { value: 'extremity', label: 'the most anomalous candidate' },
+  ],
+  'peak',
+  (value) => {
+    state.distinguisher = value as Distinguisher;
+  },
+);
+
 const byteSelect = select(
   'byte-select',
   [...Array(16).keys()].map((i) => ({ value: String(i), label: `byte ${i}` })),
@@ -962,6 +1033,7 @@ async function runDcaAttack(): Promise<void> {
         surface: state.surface,
         targets,
         bits: bitsSelected(),
+        distinguisher: state.distinguisher,
         curveByte: state.inspectByte,
       },
       (phase, done, total) => {
@@ -980,12 +1052,17 @@ async function runDcaAttack(): Promise<void> {
     dcaStatus.textContent = `Attack #${state.runs.dca}: scored ${count(
       256 * 16 * targets.length * bitsSelected().length,
     )} hypothesis evaluations in ${report.elapsedMs} ms.`;
+    // A recovery counts as done when it HAPPENS. A later run against a
+    // defended placement does not undo it.
+    if (report.surface === 'input' && report.correctCount >= 4) state.stagesDone.recover = true;
+    if (state.log.length >= 4) state.stagesDone.boundary = true;
     recordLogRow(report);
     renderDca(report);
     await refreshInspector();
     curvesFigure.describe(drawCurves(curvesFigure.canvas, report));
     renderLog();
     renderFixture();
+    renderGuide();
   } catch (error) {
     const err = error as Error & { code?: string };
     state.dca = null;
@@ -995,6 +1072,47 @@ async function runDcaAttack(): Promise<void> {
   } finally {
     setBusy(false);
   }
+}
+
+/**
+ * Bos et al.'s Tables 1 and 2, rebuilt on the reader's own instance.
+ *
+ * One row per (target, prediction bit), one column per key byte, holding the
+ * rank of the TRUE byte among the 256 candidates under that combination. Rank 1
+ * means the attack found it there; rank 256 means the true byte scored LOWEST of
+ * all 256, which sounds like a failure and is the opposite -- being reliably last
+ * identifies a byte as surely as being reliably first.
+ */
+function rankTable(report: DcaReport): HTMLElement {
+  const combos = report.combos;
+  const cells = (c: number): Cell[] => [
+    {
+      text: `${report.combos[c].target === 'inverse' ? 'inv' : report.combos[c].target === 'last-round' ? 'last' : 'S'} bit ${combos[c].bit}`,
+      cls: 'mono',
+    },
+    ...[...Array(16).keys()].map((m): Cell => {
+      const rank = report.trueRanks[m * combos.length + c];
+      const tone: VerdictTone = rank === 1 ? 'alarm' : rank === 256 ? 'warn' : 'ok';
+      return { text: String(rank), cls: `mono rank rank-${tone}` };
+    }),
+  ];
+  return el('div', {}, [
+    scroller(
+      'Rank of the true key byte under each target and prediction bit',
+      table(
+        'Where the true byte ranked among the 256 candidates, per target and bit',
+        ['Target and bit', ...[...Array(16).keys()].map((m) => `k${m}`)],
+        combos.map((_, c) => cells(c)),
+        'ranks',
+      ),
+    ),
+    el('p', { class: 'hint' }, [
+      `${report.extremeRanks} of ${16 * combos.length} cells sit at 1 or 256 rather than anywhere in between; spread evenly across the 256 ranks you would expect about ${(
+        (16 * combos.length * 2) /
+        256
+      ).toFixed(1)}. That is the observation Bos et al. record under their Tables 1 and 2, on this instance.`,
+    ]),
+  ]);
 }
 
 function headlineFor(report: DcaReport): { tone: VerdictTone; text: string } {
@@ -1092,6 +1210,8 @@ function renderDca(report: DcaReport | null): void {
     );
   }
 
+  renderNextAction(report);
+
   for (const b of report.bytes) {
     const tone: VerdictTone = b.correct ? 'alarm' : b.margin >= CONFIDENCE_MARGIN ? 'warn' : 'ok';
     byteStrip.append(
@@ -1128,6 +1248,16 @@ function renderDca(report: DcaReport | null): void {
         focusFigure.wrap,
       ]),
     ]),
+    details('Where the true byte ranked, target by target and bit by bit', (body) => {
+      body.append(
+        el('p', {}, [
+          'The attack chose a byte from the strongest signal it found. This is what ',
+          el('em', {}, ['every']),
+          ' signal said, including the ones that failed — and the failures are not random. A prediction bit that does not leak usually ranks the true byte LAST of the 256 candidates rather than somewhere in the middle, because the correct guess is the one sitting at a difference of means of nearly zero while every wrong guess picks up spurious correlation with the known input. Bos et al. record the same thing under their Tables 1 and 2 and note that it can be used to recover the key; the "most anomalous candidate" setting above does exactly that.',
+        ]),
+        rankTable(report),
+      );
+    }),
     details('Every candidate’s curve across the window', (body) => {
       body.append(
         el('p', {}, [
@@ -1159,6 +1289,7 @@ function renderDca(report: DcaReport | null): void {
                 node: verdict(b.correct ? 'alarm' : 'ok', b.correct ? 'yes' : 'no'),
               },
             ]),
+            'detail',
           ),
         ),
       );
@@ -1204,6 +1335,12 @@ function dcaSection(): HTMLElement {
         bitSelect,
         'One bit of the predicted intermediate is all the distinguisher needs. Which bit leaks depends on the instance, so scoring all eight and keeping the best is both cheaper than guessing and what an attacker would do.',
       ),
+      field(
+        'distinguisher-select',
+        'Pick the winner by',
+        distinguisherSelect,
+        'The strongest correlation is the ordinary reading. The most anomalous candidate also counts the FAILURES \u2014 see the rank table below, where a bit that does not leak usually ranks the true byte last rather than at random. That reading needs more traces: on this generator it recovers all sixteen bytes at 2,048 and does not at 384.',
+      ),
       button('run-dca', 'Run the attack', 'primary', () => void runDcaAttack()),
     ]),
     dcaError,
@@ -1213,6 +1350,7 @@ function dcaSection(): HTMLElement {
   out.append(
     el('h3', {}, ['What came out']),
     dcaOut,
+    el('div', { id: 'dca-next' }),
     el('h4', {}, ['The sixteen key bytes']),
     el('p', { class: 'hint' }, [
       'Each cell shows what the attack chose, whether it was right, and the margin between its best and second-best candidate. The margin is computed without the key, so it is the confidence an attacker would actually have.',
@@ -1222,9 +1360,11 @@ function dcaSection(): HTMLElement {
     ]),
     byteStrip,
   );
-  const inspect = panel();
-  inspect.append(el('h3', {}, ['Why it works']), dcaInspect);
-  node.append(controls, out, inspect);
+  // The mechanism sits INSIDE the result panel, under the sixteen bytes it
+  // explains, rather than in a panel of its own below. A reader who has just
+  // been told a key came out should not have to go looking for why.
+  out.append(el('h4', {}, ['Why it works']), dcaInspect);
+  node.append(controls, out);
   return node;
 }
 
@@ -1372,10 +1512,13 @@ async function runSweep(): Promise<void> {
         surface,
         targets,
         bits: [0, 1, 2, 3, 4, 5, 6, 7],
+        distinguisher: 'peak',
         curveByte: null,
       });
       state.dca = report;
       recordLogRow(report);
+      if (report.surface === 'input' && report.correctCount >= 4) state.stagesDone.recover = true;
+      if (state.log.length >= 4) state.stagesDone.boundary = true;
       renderLog();
     }
     sweepStatus.textContent = `Measured all ${plan.length} combinations at ${count(state.traces)} traces, seed "${sweepSeed}".`;
@@ -1399,6 +1542,7 @@ async function runSweep(): Promise<void> {
       surface: 'input',
       targets: ['sbox-output', 'inverse'],
       bits: [0, 1, 2, 3, 4, 5, 6, 7],
+      distinguisher: 'peak',
       curveByte: state.inspectByte,
     });
     renderBuild(state.build);
@@ -1407,6 +1551,7 @@ async function runSweep(): Promise<void> {
     await refreshInspector();
     curvesFigure.describe(drawCurves(curvesFigure.canvas, state.dca));
     await renderFixture();
+    renderGuide();
   } catch (error) {
     sweepStatus.textContent = `The sweep stopped: ${(error as Error).message}`;
   } finally {
@@ -1543,7 +1688,7 @@ async function renderFixture(): Promise<void> {
   fixtureHost.append(
     negClaim('fixture'),
     el('p', { class: 'aside-note' }, [
-      'And the honest other half: state 3 moves the problem rather than solving it. Something outside the program now holds F and G and has to apply them to every block — which is another piece of software, on some machine, with a secret in it.',
+      'And the honest other half, which the paper states too. Section 6 lists external encodings as a potential countermeasure and says they were "the primary reason why we were not able to extract the secret key from the challenge described in Section 5.5" — then immediately: "However, typically the adversary can obtain knowledge related to the external encoding applied when he observes the behavior of the white-box implementation in the entire software-framework where it is used". The problem moves rather than dissolving. Something outside the program now holds F and G and applies them to every block, and that something is another piece of software, on some machine, with a secret in it.',
     ]),
   );
 }
@@ -1558,14 +1703,14 @@ function placementSection(): HTMLElement {
   const body = panel();
   body.append(
     el('p', {}, [
-      'The thing most people expect is that turning external encodings on makes DCA fail. It does not. Bos et al. attacked an implementation with external encodings compiled into it and got the same result as without them, for a reason that is obvious once said: ',
+      'The thing most people expect is that turning external encodings on makes DCA fail. It does not. Bos et al. built two challenges from one implementation, with and without external encodings, and report in section 5.4 that the encoded one "gave similar results — this was expected as there is no difference, from our adversary perspective, when applying external encodings or omitting them since in both cases we have knowledge of the original plaintexts before any encoding is applied". Which is obvious once said: ',
       el('strong', {}, ['the attacker chooses the plaintext going in.']),
       ' If the encoder is inside the program, the attacker can always get from a plaintext they picked to the value the AES core sees, so the first-round hypotheses are as valid as ever.',
     ]),
     el('p', {}, [
       'What frustrated the attack in that paper was encodings that were ',
       el('em', {}, ['not part of the binary']),
-      ' — held outside it, so the attacker could not relate real AES inputs or outputs to the computation they were watching. The paper scopes DCA to implementations applying at most a single remotely handled external encoding, and the rows below are that sentence, measured on this generator.',
+      ' — section 5.5, the NoSuchCon 2013 challenge, where "the user input was considered as encoded with an unknown scheme and the encoded output is directly compared to a reference", which makes it "infeasible to apply a meaningful DPA attack, since, for a DPA attack, we need to construct the guesses for the intermediate values". The paper scopes DCA, in its introduction and again in section 2, to implementations applying at most a single remotely handled external encoding — and gives a sharper reason than "the attack stops working": with BOTH sides handled remotely, "the implementation is not a white-box implementation of a standard algorithm (like AES or DES) but of a modified algorithm". It has stopped being an AES implementation at all. The rows below are those sentences, measured on this generator.',
     ]),
     el('div', { class: 'control-row' }, [
       button('sweep', 'Measure all seven combinations', 'plain', () => void runSweep()),
@@ -1581,7 +1726,10 @@ function placementSection(): HTMLElement {
           'Two different kinds of number, kept apart on purpose. Measured here, over five instances at 384 traces, attacking the input side with all eight prediction bits: 12 to 16 bytes of 16 from the SubBytes-output target alone, 13 to 16 from the inverse target alone, 14 to 16 with the two combined, and 15 to 16 combined at 1,024 traces. Those are properties of this generator at those trace counts, not of Chow’s construction.',
         ]),
         el('p', {}, [
-          'Reported by Bos, Hubain, Michiels and Teuwen (CHES 2016) about the implementations they attacked: 15 of 16 bytes from one target on one instance at 2,000 traces, 16 of 16 using the multiplicative-inverse target, and the full key whenever the two were combined across the instances they tested. Their figures, their implementations — and carried here at second hand, not re-read out of the paper by this lab. The numbers above them are the ones this page measured, and those are the ones it stands behind.',
+          'Reported by Bos, Hubain, Michiels and Teuwen (CHES 2016) in section 5.4, about the Karroumi-style implementation they attacked: targeting the SubBytes output at 2,000 traces, "15 out of 16 key bytes were ranked at position 1 for at least one of the target bits and one key byte … did not show any strong candidate", and recovering that last one is "trivial using brute-force". Targeting the multiplicative inverse instead, "the 16 bytes were successfully recovered — and the number of required traces can even be reduced to about 500 — but it may vary for other generations of the white-box as the distribution of leakages … depends on the random source used in the white-box generator". Combining the two: "we could always recover the full key". Their figures, their implementation.',
+        ]),
+        el('p', {}, [
+          'And one corroboration that was not aimed for. Their first-round traces come to 832 kbits over 500 runs — 1,664 bits per trace. This lab records 1,792 bits for its own first round. Two independent implementations of the same construction, recording the same round, within eight per cent of each other.',
         ]),
         el('p', {}, [
           'One result on this page is neither: attacking the OUTPUT side recovers only part of the last round key, and the part it recovers does not complete. The reason is structural and worth knowing. Chow’s first-round tables are 8 → 32, so a first-round key byte is exposed through eight encoded nibbles; his round-10 tables are 8 → 8, so a last-round key byte is exposed through two. Four times fewer places for a correlation to be. And inverting the AES-128 key schedule needs all sixteen bytes of k¹⁰, so a partial recovery of it yields nothing about the key.',
@@ -1641,8 +1789,10 @@ async function runBge(): Promise<void> {
     });
     state.bge = report;
     state.runs.bge += 1;
+    state.stagesDone.tables = true;
     bgeStatus.textContent = `Step A1 #${state.runs.bge} finished in ${report.elapsedMs} ms.`;
     renderBge(report);
+    renderGuide();
   } catch (error) {
     const err = error as Error & { code?: string };
     state.bge = null;
@@ -1757,20 +1907,25 @@ function bgeSection(): HTMLElement {
   gate.append(
     el('h3', {}, ['What is NOT run in this page']),
     el('p', {}, [
-      'Steps A2 and A3 of the BGE attack are not implemented here and are not animated here. A2 pins down the affine part step A1 leaves behind, using the affine-equivalence algorithm of Biryukov, De Cannière, Braeken and Preneel (EUROCRYPT 2003); A3 then extracts the round key. Nothing on this page does either, and nothing on this page pretends to.',
+      'The steps after A1 are not implemented here and are not animated here. A1 leaves each output encoding known up to an unknown GF(2)-affine map; the next step pins that map down, and only then can the T-box outputs be computed and the round key read off. Nothing on this page does either, and nothing on this page pretends to.',
+    ]),
+    el('p', {}, [
+      'So of the two attacks this lab runs, ',
+      el('strong', {}, ['one reaches a key and the other reaches the encodings.']),
+      ' DCA in act 4 recovers the key. BGE step A1 in this act recovers the encodings from the tables with no traces at all, which is what the full published attack builds on to reach the key — but the reaching is not done here.',
     ]),
     definitionList([
       [
         'Published work factor, whole attack',
-        `2^${PUBLISHED_WORK_FACTORS.bge2004.exponent} with negligible memory — ${PUBLISHED_WORK_FACTORS.bge2004.source}`,
+        `2^${PUBLISHED_WORK_FACTORS.bge2004.exponent} — and it decomposes. Billet et al. estimate 2^24 work-steps to approximate ONE output encoding, so 16 × 2^24 = 2^28 for a whole round, and they recommend doing three consecutive rounds (3 × 2^28 < 2^30), which recovers two complete round keys and removes any ambiguity in the byte order. ${PUBLISHED_WORK_FACTORS.bge2004.source}`,
       ],
       [
         'Reduced by Lepoint et al.',
         `2^${PUBLISHED_WORK_FACTORS.lepoint2013.exponent} — ${PUBLISHED_WORK_FACTORS.lepoint2013.source}`,
       ],
       [
-        'What the published attack covers',
-        'Chow’s construction including the external input and output encodings Chow specifies — reported at second hand rather than read out of the paper here, and scoped to that construction rather than to arbitrary external encodings in other designs.',
+        'Why the two attacks belong on the same page',
+        'Bos et al. section 5.5 is the one challenge their trace-based attack could not break, because its external encodings were not in the binary. The same section records what happened next: "Nevertheless we did manage to recover the key and the encodings from this white-box implementation with a new algebraic attack." Where the statistics run out, the algebra does not.',
       ],
       ['What runs here', 'Step A1 only, live, on the tables this page built, with zero traces.'],
     ]),
@@ -1841,11 +1996,354 @@ function setBusy(busy: boolean): void {
   document.documentElement.toggleAttribute('data-busy', running);
 }
 
+// ── the state-aware next action ─────────────────────────────────────────────
+
+/**
+ * One obvious thing to do next, chosen from what the last run actually produced.
+ *
+ * The honest default result is a PARTIAL recovery, and a partial recovery reads
+ * as a weak ending unless the reader already knows that ticking a second target
+ * finishes it. That knowledge should not be a prerequisite. So the page looks at
+ * what just happened and offers the single step that addresses it -- and it is
+ * always a step the reader takes, never one the page takes for them, because
+ * causing the failure is the point.
+ */
+function renderNextAction(report: DcaReport): void {
+  const host = document.getElementById('dca-next');
+  if (!host) return;
+  clear(host);
+
+  const missed = report.bytes.filter((b) => !b.correct).length;
+  const usingBoth = report.targets.length > 1;
+  const allBits = report.bits.length === 8;
+
+  interface Next {
+    readonly id: string;
+    readonly lead: string;
+    readonly label: string;
+    readonly act: () => void;
+  }
+  let next: Next | null = null;
+
+  if (report.surface === 'input' && missed > 0 && !usingBoth) {
+    next = {
+      id: 'next-add-inverse',
+      lead:
+        `${missed} of the 16 bytes did not come out. They are not unrecoverable — the bits that carry them ` +
+        `simply do not leak under this target. The multiplicative inverse inside SubBytes is a different basis of ` +
+        `the same 8-bit space, so it exposes a different set of bits, and the same traces will do.`,
+      label: `Add the inverse target and recover the missing ${missed === 1 ? 'byte' : `${missed} bytes`}`,
+      act: () => {
+        state.inputTargets = ['sbox-output', 'inverse'];
+        for (const id of ['target-sbox', 'target-inverse']) {
+          const box = document.getElementById(id);
+          if (box instanceof HTMLInputElement) box.checked = true;
+        }
+        void runDcaAttack();
+      },
+    };
+  } else if (report.surface === 'input' && missed > 0 && !allBits) {
+    next = {
+      id: 'next-all-bits',
+      lead: `${missed} bytes did not come out, and only one prediction bit was scored. Which bit leaks depends on the instance.`,
+      label: 'Score all eight prediction bits',
+      act: () => {
+        state.bitChoice = 'all';
+        bitSelect.value = 'all';
+        void runDcaAttack();
+      },
+    };
+  } else if (report.surface === 'input' && missed > 0 && report.traces < 1024) {
+    next = {
+      id: 'next-more-traces',
+      lead: `${missed} bytes did not come out at ${count(report.traces)} traces. DCA is a statistical attack; more traces is the ordinary answer.`,
+      label: 'Record 1,024 traces and try again',
+      act: () => {
+        state.traces = 1024;
+        traceNumber.value = '1024';
+        traceRange.value = '1024';
+        void runTrace().then(() => runDcaAttack());
+      },
+    };
+  } else if (report.complete && state.placement === 'none') {
+    next = {
+      id: 'next-move-encodings',
+      lead:
+        'The whole key came out of a program that never stored it. Now find out what stops that — ' +
+        'the answer is not the one most people expect.',
+      label: 'Move the external encodings (Act 5)',
+      act: () => {
+        document.getElementById('act-placement')?.scrollIntoView({ block: 'start' });
+      },
+    };
+  } else if (report.correctCount <= 2 && state.placement === 'remote-both') {
+    next = {
+      id: 'next-bge',
+      lead:
+        'This run recovered nothing, which is the right answer for this placement. It is not the same as the ' +
+        'key being safe: a second attack reads the tables and never runs the program at all.',
+      label: 'Read the tables instead (Act 6)',
+      act: () => {
+        document.getElementById('act-bge')?.scrollIntoView({ block: 'start' });
+      },
+    };
+  }
+
+  if (!next) return;
+  host.append(
+    el('div', { class: 'next-action', id: next.id }, [
+      el('p', { class: 'next-lead' }, [next.lead]),
+      button(`${next.id}-btn`, next.label, 'primary', next.act),
+    ]),
+  );
+}
+
+// ── the guided route ────────────────────────────────────────────────────────
+
+/**
+ * A rail that guides without gating.
+ *
+ * The fleet convention is explicit that depth belongs in progressive disclosure
+ * rather than behind a mode, so there is no "Demo" toggle here and nothing is
+ * hidden from anyone: every act, control, derivation and caveat is on the page
+ * at all times. What this adds is a ROUTE through them -- the one action worth
+ * taking next, in the first viewport, with a rail showing where that sits in the
+ * whole story.
+ *
+ * The five stages are the five things this lab exists to show, and the rail
+ * tracks what the reader has actually done rather than where they have scrolled:
+ * a stage is complete when its computation has produced a result, so the rail
+ * cannot claim progress the page has not made.
+ */
+type StageId = 'build' | 'trace' | 'recover' | 'boundary' | 'tables';
+
+interface Stage {
+  readonly id: StageId;
+  readonly label: string;
+  readonly section: string;
+  /** What pressing the primary button does at this stage. */
+  readonly action: string;
+  readonly lead: string;
+  readonly run: () => void | Promise<void>;
+  readonly done: () => boolean;
+}
+
+const STAGES: readonly Stage[] = [
+  {
+    id: 'build',
+    label: 'Build',
+    section: 'act-build',
+    action: 'Build a glass box',
+    lead: 'Compile an AES-128 key into a network of lookup tables that contains no copy of it, and check that network against WebCrypto.',
+    run: () => runBuild(),
+    done: () => state.stagesDone.build,
+  },
+  {
+    id: 'trace',
+    label: 'Trace',
+    section: 'act-trace',
+    action: 'Record its lookups',
+    lead: 'Run it a few hundred times and record the output of every table lookup. The recording looks like noise, which is the honest result.',
+    run: () => runTrace(),
+    done: () => state.stagesDone.trace,
+  },
+  {
+    id: 'recover',
+    label: 'Recover',
+    section: 'act-dca',
+    action: 'Take the key out of the noise',
+    lead: 'Split the traces by one predicted bit and measure the difference in the averages. The candidate whose split separates the traces best is the key byte.',
+    run: () => runDcaAttack(),
+    done: () => state.stagesDone.recover,
+  },
+  {
+    id: 'boundary',
+    label: 'Move the encodings',
+    section: 'act-placement',
+    action: 'Find out what actually stops it',
+    lead: 'Chow wraps the cipher in external encodings. Whether that helps depends entirely on who holds them, and the answer surprises most people.',
+    run: async () => {
+      document.getElementById('act-placement')?.scrollIntoView({ block: 'start' });
+      await runSweep();
+    },
+    done: () => state.stagesDone.boundary,
+  },
+  {
+    id: 'tables',
+    label: 'Read the tables',
+    section: 'act-bge',
+    action: 'Attack it without running it',
+    lead: 'The other attack family needs no traces at all. It reads the tables and strips the encodings off them algebraically.',
+    run: () => runBge(),
+    done: () => state.stagesDone.tables,
+  },
+];
+
+const railHost = el('div', { id: 'guide-rail', class: 'rail', role: 'list', 'aria-label': 'Guided route' });
+const guideLead = el('p', { class: 'guide-lead', id: 'guide-lead' });
+const guideActionHost = el('div', { class: 'guide-action', id: 'guide-action' });
+const guideStatus = status('guide-status');
+
+function currentStage(): Stage {
+  for (const stage of STAGES) if (!stage.done()) return stage;
+  return STAGES[STAGES.length - 1];
+}
+
+function renderGuide(): void {
+  const active = currentStage();
+  const allDone = STAGES.every((s) => s.done());
+
+  clear(railHost);
+  for (const stage of STAGES) {
+    const done = stage.done();
+    const isActive = !allDone && stage.id === active.id;
+    const stateWord = done ? 'done' : isActive ? 'next' : 'to do';
+    railHost.append(
+      el(
+        'li',
+        {
+          role: 'listitem',
+          class: `rail-step ${done ? 'is-done' : ''} ${isActive ? 'is-active' : ''}`.trim(),
+          'data-stage': stage.id,
+          'data-state': done ? 'done' : isActive ? 'active' : 'pending',
+        },
+        [
+          el('span', { class: 'rail-glyph', 'aria-hidden': 'true' }, [done ? '✓' : isActive ? '▸' : '·']),
+          el('a', { class: 'rail-label', href: `#${stage.section}` }, [stage.label]),
+          el('span', { class: 'rail-state' }, [stateWord]),
+        ],
+      ),
+    );
+  }
+
+  clear(guideActionHost);
+  if (allDone) {
+    guideLead.textContent =
+      'You have run the whole route: a key compiled into tables, traced, recovered from the noise, defended by moving the encodings, and then taken out of the tables by a different attack entirely. Everything below is still live — change the key, the placement, the trace count or the distinguisher and measure again.';
+    guideActionHost.append(
+      button('guide-restart', 'Start again with a fresh key', 'plain', () => {
+        keyInput.value = randomKeyHex();
+        state.keyOrigin = 'generated';
+        state.log = [];
+        state.stagesDone = { build: false, trace: false, recover: false, boundary: false, tables: false };
+        renderLog();
+        void runBuild();
+      }),
+    );
+  } else {
+    guideLead.textContent = active.lead;
+    guideActionHost.append(
+      button('guide-run', active.action, 'primary', () => {
+        const section = document.getElementById(active.section);
+        section?.scrollIntoView({ block: 'start' });
+        void active.run();
+      }),
+    );
+  }
+}
+
+function guideSection(): HTMLElement {
+  return el('section', { id: 'guide', class: 'guide', 'aria-labelledby': 'guide-h' }, [
+    el('h2', { id: 'guide-h', class: 'guide-h' }, ['Take the key out of a program that does not contain it']),
+    guideLead,
+    guideActionHost,
+    railHost,
+    guideStatus,
+  ]);
+}
+
+// ── the act navigator ───────────────────────────────────────────────────────
+
+/**
+ * A slim sticky index of the acts.
+ *
+ * The page is long -- that is a property of the subject, not a defect -- and a
+ * reader four screens into act 4 has no way back without scrolling past
+ * everything. This gives them one, marks where they are, and costs 34 pixels.
+ *
+ * It sticks BELOW the shared top bar rather than under it, and the offset is
+ * measured from the bar at run time rather than hard-coded, because that bar is
+ * copied from a sibling lab and its height is not this repo's to assume.
+ */
+const ACT_LINKS: readonly { readonly id: string; readonly label: string }[] = [
+  { id: 'guide', label: 'Start' },
+  { id: 'scope', label: 'Scope' },
+  { id: 'act-threat', label: '1 Threat model' },
+  { id: 'act-build', label: '2 Build' },
+  { id: 'act-trace', label: '3 Trace' },
+  { id: 'act-dca', label: '4 Recover' },
+  { id: 'act-placement', label: '5 Encodings' },
+  { id: 'act-bge', label: '6 Algebra' },
+  { id: 'act-after', label: '7 After' },
+];
+
+function actNav(): HTMLElement {
+  const nav = el('nav', { class: 'act-nav', id: 'act-nav', 'aria-label': 'Acts' });
+  for (const link of ACT_LINKS) {
+    nav.append(el('a', { href: `#${link.id}`, 'data-act-link': link.id }, [link.label]));
+  }
+  return nav;
+}
+
+function trackActiveAct(): void {
+  const bar = document.querySelector('.cl-topbar');
+  const setOffset = (): void => {
+    const height = bar instanceof HTMLElement ? bar.getBoundingClientRect().height : 0;
+    document.documentElement.style.setProperty('--topbar-h', `${Math.round(height)}px`);
+  };
+  setOffset();
+  if (bar instanceof HTMLElement && typeof ResizeObserver === 'function') {
+    new ResizeObserver(setOffset).observe(bar);
+  }
+
+  if (typeof IntersectionObserver !== 'function') return;
+  const links = new Map<string, Element>();
+  for (const link of ACT_LINKS) {
+    const anchor = document.querySelector(`[data-act-link="${link.id}"]`);
+    if (anchor) links.set(link.id, anchor);
+  }
+  const visible = new Set<string>();
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) visible.add(entry.target.id);
+        else visible.delete(entry.target.id);
+      }
+      // The topmost visible act is the one a reader is in.
+      let current: string | null = null;
+      for (const link of ACT_LINKS) {
+        if (visible.has(link.id)) {
+          current = link.id;
+          break;
+        }
+      }
+      for (const [id, anchor] of links) {
+        if (id === current) anchor.setAttribute('aria-current', 'true');
+        else anchor.removeAttribute('aria-current');
+      }
+    },
+    { rootMargin: '-20% 0px -60% 0px' },
+  );
+  for (const link of ACT_LINKS) {
+    const section = document.getElementById(link.id);
+    if (section) observer.observe(section);
+  }
+}
+
+// ── mounting, last, so every declaration it touches is initialised ─────────
+
+// The act navigator goes between the hero and the acts, and is inserted HERE
+// rather than at the `app.append` above because its link list is a `const`
+// declared further down the file: calling `actNav()` up there reads it inside
+// its temporal dead zone and the whole page fails to render.
+app.insertBefore(actNav(), main);
+
 seedInput.addEventListener('change', () => {
   state.seed = seedInput.value.trim();
 });
 
 main.append(
+  guideSection(),
   scopeSection(),
   threatSection(),
   buildSection(),
@@ -1863,7 +2361,15 @@ app.append(
   ]),
 );
 
+keyInput.addEventListener('input', () => {
+  // A key the reader typed is theirs, and does not travel in a share link.
+  state.keyOrigin = 'typed';
+});
+
 renderTargetChecks();
+applyRunLink();
+trackActiveAct();
+renderGuide();
 renderBuild(null);
 renderTrace(null);
 renderDca(null);
@@ -1874,3 +2380,120 @@ void renderFixture();
 // and the acts after it have something to act on. Tracing and attacking stay the
 // reader's move, because causing the failure is the point.
 void runBuild();
+
+// ── reproducible run links ─────────────────────────────────────────────────
+
+/**
+ * Every setting that changes what this page computes, as URL parameters.
+ *
+ * Nothing here is a secret and the page says so where each one is set: a seed
+ * makes an instance reproducible, which is exactly why a seeded instance is
+ * labelled not secret. The key is included only when the page chose it.
+ */
+function runLink(): string {
+  const params = new URLSearchParams();
+  if (state.seed.length > 0) params.set('seed', state.seed);
+  if (state.keyOrigin !== 'typed') params.set('key', keyInput.value.replace(/\s+/g, '').toLowerCase());
+  params.set('placement', state.placement);
+  params.set('traces', String(state.traces));
+  params.set('surface', state.surface);
+  params.set('targets', targetsSelected().join(','));
+  params.set('bits', state.bitChoice === 'all' ? 'all' : String(state.bitChoice));
+  params.set('score', state.distinguisher);
+  return `${location.origin}${location.pathname}?${params.toString()}`;
+}
+
+/**
+ * Apply whatever a link carried, before the first build.
+ *
+ * Every parameter is validated against the same ranges the controls enforce, and
+ * an unrecognised value is ignored rather than trusted -- a URL is input like any
+ * other, and this one arrives from outside.
+ */
+function applyRunLink(): void {
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(location.search);
+  } catch {
+    return;
+  }
+  const key = params.get('key');
+  if (key !== null && /^[0-9a-f]{32}$/i.test(key)) {
+    keyInput.value = key.toLowerCase();
+    state.keyOrigin = 'generated';
+  }
+  const seed = params.get('seed');
+  if (seed !== null && seed.length <= 200) {
+    state.seed = seed;
+    seedInput.value = seed;
+  }
+  const placement = params.get('placement');
+  if (placement !== null && (ENCODING_PLACEMENTS as readonly string[]).includes(placement)) {
+    state.placement = placement as EncodingPlacement;
+    const radio = document.getElementById(`placement-${placement}`);
+    if (radio instanceof HTMLInputElement) radio.checked = true;
+  }
+  const traces = Number(params.get('traces'));
+  if (Number.isInteger(traces) && traces >= MIN_TRACES && traces <= MAX_TRACES) {
+    state.traces = traces;
+    traceNumber.value = String(traces);
+    traceRange.value = String(traces);
+  }
+  const surface = params.get('surface');
+  if (surface === 'input' || surface === 'output') {
+    state.surface = surface;
+    const radio = document.getElementById(`surface-${surface}`);
+    if (radio instanceof HTMLInputElement) radio.checked = true;
+    renderTargetChecks();
+  }
+  const targets = (params.get('targets') ?? '').split(',').filter((t) => t === 'sbox-output' || t === 'inverse');
+  if (targets.length > 0 && state.surface === 'input') {
+    state.inputTargets = targets as DcaTarget[];
+    renderTargetChecks();
+  }
+  const bits = params.get('bits');
+  if (bits === 'all') {
+    state.bitChoice = 'all';
+    bitSelect.value = 'all';
+  } else if (bits !== null && /^[0-7]$/.test(bits)) {
+    state.bitChoice = Number(bits);
+    bitSelect.value = bits;
+  }
+  const score = params.get('score');
+  if (score === 'peak' || score === 'extremity') {
+    state.distinguisher = score;
+    distinguisherSelect.value = score;
+  }
+}
+
+function shareControl(): HTMLElement {
+  return el('div', { class: 'control-row', id: 'share' }, [
+    button('copy-run-link', 'Copy a link to this run', 'plain', () => {
+      const link = runLink();
+      // The note is the same either way. A reader whose browser will not hand
+      // the page a clipboard should still be told what the link does and does
+      // not carry -- they are the one who will paste it.
+      const note =
+        state.keyOrigin === 'typed'
+          ? 'The link carries the seed and every setting, but NOT the key you typed \u2014 a page should not put a reader\u2019s own input into a URL somebody might paste elsewhere. Generate a key, or leave the default, and it travels too.'
+          : 'The link carries the key, the seed and every setting. None of it is a secret: a seed reproduces the whole instance, which is exactly why this page calls a seeded instance not secret.';
+      const done = (copied: boolean): void => {
+        shareStatus.textContent = copied
+          ? `Copied. ${note}`
+          : `${note} Your browser did not let the page reach the clipboard, so here it is: ${link}`;
+      };
+      const clipboard = navigator.clipboard;
+      if (!clipboard) {
+        done(false);
+        return;
+      }
+      void clipboard
+        .writeText(link)
+        .then(() => done(true))
+        .catch(() => done(false));
+    }),
+    el('p', { class: 'hint' }, [
+      'Reproducibility is the point: a seed pins every encoding and mixing bijection, so the same link gives the same instance, the same traces and the same recovery.',
+    ]),
+  ]);
+}

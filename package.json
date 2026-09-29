@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "test:a11y": "playwright test --project=a11y",
     "test:claims": "playwright test --project=claims",
-    "test:e2e:all": "playwright test"
+    "test:e2e:all": "playwright test",
+    "og": "playwright test --project=og"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

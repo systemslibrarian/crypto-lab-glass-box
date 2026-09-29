@@ -10,6 +10,22 @@
     <meta name="author" content="systemslibrarian" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#080c11" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Glass Box — white-box AES, broken in your browser" />
+    <meta
+      property="og:description"
+      content="Compile an AES-128 key into 2,032 lookup tables that contain no copy of it, then take it back out of a few hundred traces of the program's own memory reads — and out of the tables themselves, with no traces at all."
+    />
+    <meta property="og:url" content="https://systemslibrarian.github.io/crypto-lab-glass-box/" />
+    <meta property="og:image" content="https://systemslibrarian.github.io/crypto-lab-glass-box/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="A trace heatmap split into two halves by a predicted key bit, with one column of samples separating light from dark — the difference of means that recovers an AES key byte."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://systemslibrarian.github.io/crypto-lab-glass-box/og-image.png" />
     <link
       rel="icon"
       type="image/svg+xml"

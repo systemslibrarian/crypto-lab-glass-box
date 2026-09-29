@@ -340,7 +340,7 @@ test.describe('Act 4: what the attack claims', () => {
     await trace(page, 256);
     await attack(page, 'input');
     await page.locator('details.more', { hasText: 'Per-byte detail' }).locator('summary').click();
-    const rows = page.locator('#dca-inspect table.matrix tbody tr');
+    const rows = page.locator('#dca-inspect table.matrix.detail tbody tr');
     await expect(rows).toHaveCount(16);
     for (let i = 0; i < 16; i++) {
       const cells = await rows.nth(i).locator('th, td').allInnerTexts();
@@ -367,7 +367,7 @@ test.describe('Act 4: what the attack claims', () => {
     const samples = number((detail.match(/([\d,]+) samples/) ?? [])[1]);
     expect(samples).toBe(1792);
     await page.locator('details.more', { hasText: 'Per-byte detail' }).locator('summary').click();
-    const rows = page.locator('#dca-inspect table.matrix tbody tr');
+    const rows = page.locator('#dca-inspect table.matrix.detail tbody tr');
     for (let i = 0; i < 16; i++) {
       const cells = await rows.nth(i).locator('th, td').allInnerTexts();
       const sample = number(cells[5]);
@@ -381,8 +381,12 @@ test.describe('Act 4: what the attack claims', () => {
     await trace(page, 256);
     await attack(page, 'input');
     const before = await page.locator('#peaks-plot').getAttribute('aria-label');
-    await page.locator('#byte-select').selectOption('9');
-    await expect(page.locator('#peaks-plot')).toHaveAttribute('aria-label', /key byte 9/);
+    // A byte the inspector is not already showing: after a run it opens on the
+    // byte the attack was most confident about, which can be any of them.
+    const shown = Number(await page.locator('#byte-select').inputValue());
+    const other = String((shown + 7) % 16);
+    await page.locator('#byte-select').selectOption(other);
+    await expect(page.locator('#peaks-plot')).toHaveAttribute('aria-label', new RegExp(`key byte ${other}\\b`));
     const after = await page.locator('#peaks-plot').getAttribute('aria-label');
     expect(after).not.toBe(before);
     // And the visible caption says the same thing as the label a reader hears.
@@ -562,8 +566,11 @@ test.describe('NEG-1 as an evidence fixture', () => {
     await boot(page);
     await reachFixture(page);
     const text = (await page.locator('#neg-fixture').innerText()).replace(/\s+/g, ' ');
-    expect(text).toContain('moves the problem rather than solving it');
-    expect(text).toContain('has to apply them to every block');
+    expect(text).toContain('The problem moves rather than dissolving');
+    expect(text).toContain('applies them to every block');
+    // ...and the paper says it too, with the section it says it in.
+    expect(text).toContain('Section 6');
+    expect(text).toContain('the primary reason why we were not able to extract the secret key');
   });
 
   test('the claim retires with its fixture: change the placement and it is gone', async ({ page }) => {
@@ -604,8 +611,11 @@ test.describe('Act 6: the algebraic attack', () => {
   test('it does not claim to run the steps it does not run', async ({ page }) => {
     await boot(page);
     const honest = page.locator('.honest-panel');
-    await expect(honest).toContainText('Steps A2 and A3 of the BGE attack are not implemented here');
+    await expect(honest).toContainText('The steps after A1 are not implemented here');
     await expect(honest).toContainText('nothing on this page pretends to');
+    // The promise and the computation have to agree: one attack reaches a key,
+    // the other reaches the encodings, and the page says which is which.
+    await expect(honest).toContainText('one reaches a key and the other reaches the encodings');
     await expect(honest).toContainText('2^30');
     await expect(honest).toContainText('2^22');
     await expect(honest).toContainText('Step A1 only');
@@ -722,6 +732,242 @@ test.describe('failure paths: the page names the actual cause', () => {
   });
 });
 
+/**
+ * The guided route, end to end, pressing nothing but the one button the page
+ * offers next.
+ *
+ * This is the test that stands in for a newcomer. It never touches a control it
+ * was not pointed at, it never combines two settings from knowledge the page did
+ * not give it, and it asserts that the first thing it is asked to press is
+ * visible without scrolling -- on a desktop and on a phone.
+ */
+test.describe('the guided route', () => {
+  for (const viewport of [
+    { width: 1440, height: 900, label: 'desktop' },
+    { width: 390, height: 844, label: 'phone' },
+  ]) {
+    test(`one button per stage reaches a full recovery (${viewport.label})`, async ({ page }) => {
+      test.setTimeout(900_000);
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await boot(page);
+
+      // 1. The first action is in the first viewport, unscrolled.
+      const first = page.locator('#guide-action button');
+      const box = await first.boundingBox();
+      expect(box, 'the guided action must be on the page').not.toBeNull();
+      expect(box!.y + box!.height, `${viewport.label}: the first action must fit above the fold`).toBeLessThanOrEqual(
+        viewport.height,
+      );
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+      // 2. The rail starts with Build already done -- the page builds on load --
+      //    and Trace as the next thing.
+      await expect(page.locator('#guide-rail [data-stage="build"]')).toHaveAttribute('data-state', 'done');
+      await expect(page.locator('#guide-rail [data-stage="trace"]')).toHaveAttribute('data-state', 'active');
+
+      // 3. Press whatever it offers, until it offers nothing more. Driven by
+      //    the page rather than by a fixed script: one press can finish more
+      //    than one stage -- the placement sweep ends on the state the negative
+      //    claim is about, and reaching that state runs the algebraic attack
+      //    too, because the claim is not made without its evidence.
+      const stages = ['build', 'trace', 'recover', 'boundary', 'tables'];
+      const stateOf = (stage: string): Promise<string | null> =>
+        page.locator(`#guide-rail [data-stage="${stage}"]`).getAttribute('data-state');
+      const remaining = async (): Promise<number> => {
+        let n = 0;
+        for (const stage of stages) if ((await stateOf(stage)) !== 'done') n++;
+        return n;
+      };
+
+      for (let press = 0; press < stages.length; press++) {
+        const left = await remaining();
+        if (left === 0) break;
+        const label = await first.innerText();
+        await first.click();
+        await expect.poll(remaining, { timeout: 600_000 }).toBeLessThan(left);
+        expect(await first.innerText(), `the action must change after "${label}"`).not.toBe(label);
+      }
+
+      // 4. Every stage is done, and the key really came out along the way.
+      expect(await remaining(), 'the guided route must complete').toBe(0);
+      for (const stage of stages) {
+        await expect(page.locator(`#guide-rail [data-stage="${stage}"]`)).toHaveAttribute('data-state', 'done');
+      }
+      await expect(page.locator('#guide-lead')).toContainText('You have run the whole route');
+      // The placement sweep leaves the page on remote-both, so the last verdict
+      // on screen is the defended one; the recovery it passed through is in the log.
+      const log = (await page.locator('#placement-log').innerText()).replace(/\s+/g, ' ');
+      expect(log).toContain('no external encodings');
+      expect(log).toMatch(/1[4-6] of 16/);
+      await expect(page.locator('#bge-verdict')).toHaveAttribute('data-bge-verdict', 'stripped');
+
+      // 5. And none of it pushed the page sideways.
+      const overflow = await page.evaluate(() => {
+        const doc = document.documentElement;
+        return doc.scrollWidth > doc.clientWidth ? `${doc.scrollWidth} > ${doc.clientWidth}` : null;
+      });
+      expect(overflow, `${viewport.label}: no horizontal overflow`).toBeNull();
+    });
+  }
+});
+
+/**
+ * Every central historical claim is tied to a place in a paper, and the page
+ * says which. These assertions exist so a citation cannot quietly drift away
+ * from the sentence it supports.
+ */
+test.describe('primary sources', () => {
+  test('the page cites the section each claim comes from', async ({ page }) => {
+    await boot(page);
+    for (const d of await page.locator('details.more').all()) await d.locator('summary').click();
+    const body = (await page.locator('#app').innerText()).replace(/\s+/g, ' ');
+
+    // Bos et al. (CHES 2016): the compiled-in result, the failure case, the
+    // scope, and the reported figures.
+    expect(body).toContain('section 5.4');
+    expect(body).toContain('gave similar results');
+    expect(body).toContain('section 5.5');
+    expect(body).toContain('infeasible to apply a meaningful DPA attack');
+    expect(body).toContain('at most a single remotely handled external encoding');
+    expect(body).toContain('not a white-box implementation of a standard algorithm');
+    expect(body).toContain('15 out of 16 key bytes');
+    // Section 6 is cited beside the NEG-1 fixture, which only exists once the
+    // page has been driven into the state the claim is about -- so it is
+    // asserted there, in the fixture's own test, rather than here.
+
+    // BGE: the decomposition of the published work factor, and what this page
+    // does NOT run.
+    expect(body).toContain('2^24');
+    expect(body).toContain('2^28');
+    expect(body).toContain('2^30');
+    expect(body).toContain('one reaches a key and the other reaches the encodings');
+
+    // FIPS 197 and the construction.
+    expect(body).toContain('FIPS 197');
+    expect(body).toContain('Ech-Chatbi');
+    expect(body).not.toContain('Echauzier');
+  });
+});
+
+/**
+ * The rank table and the second distinguisher.
+ *
+ * These reproduce a published observation on the reader's own instance, so the
+ * tests check that the page reports what it measured rather than a number
+ * someone typed into the copy.
+ */
+test.describe('Act 4: reading the failures', () => {
+  test('the rank table is the true byte\u2019s rank, and the count of extremes matches the cells', async ({ page }) => {
+    await boot(page);
+    await setSeed(page, 'ranks');
+    await build(page, 'none');
+    // 2,048, which is the trace count Bos et al. report their tables at. The
+    // effect is weaker with fewer traces and the page says so, so a test that
+    // asserted it at 384 would be asserting the wrong thing.
+    await trace(page, 2048);
+    await attack(page, 'input', ['sbox', 'inverse']);
+    await page.locator('details.more', { hasText: 'Where the true byte ranked' }).locator('summary').click();
+
+    const rows = page.locator('#dca-inspect table.matrix.ranks tbody tr');
+    await expect(rows).toHaveCount(16); // two targets x eight prediction bits
+    let extremes = 0;
+    let cells = 0;
+    for (let r = 0; r < 16; r++) {
+      const values = (await rows.nth(r).locator('td').allInnerTexts()).map((t) => Number(t));
+      expect(values).toHaveLength(16); // one per key byte
+      for (const v of values) {
+        expect(v, `row ${r}`).toBeGreaterThanOrEqual(1);
+        expect(v, `row ${r}`).toBeLessThanOrEqual(256);
+        cells++;
+        if (v === 1 || v === 256) extremes++;
+      }
+    }
+    expect(cells).toBe(256);
+    // The sentence under the table has to be the count of the table above it.
+    const caption = await page.locator('#dca-inspect').innerText();
+    expect(caption.replace(/\s+/g, ' ')).toContain(`${extremes} of 256 cells sit at 1 or 256`);
+    // And the phenomenon is really there: an even spread would give about two.
+    expect(extremes).toBeGreaterThan(150);
+  });
+
+  test('the second distinguisher scores in its own units and says so', async ({ page }) => {
+    await boot(page);
+    await setSeed(page, 'extremity');
+    await build(page, 'none');
+    await trace(page, 2048);
+
+    await attack(page, 'input', ['sbox', 'inverse']);
+    const byPeak = (await definition(page, '#dca-out', 'What the attack committed to')).replace(/\s/g, '');
+
+    await page.locator('#distinguisher-select').selectOption('extremity');
+    await afterRun(page, 'dca-status', () => page.locator('#run-dca').click());
+    const byExtremity = (await definition(page, '#dca-out', 'What the attack committed to')).replace(/\s/g, '');
+    const truth = (await definition(page, '#dca-out', 'The truth, consulted only afterwards')).replace(/\s/g, '');
+
+    // Two different readings of the same traces, and at this trace count both
+    // arrive at the key -- which is the claim the page makes about it.
+    expect(byExtremity).toBe(truth);
+    expect(byPeak).toBe(truth);
+    // The scores are not differences of means any more, so they are not in [0, 1].
+    await page.locator('details.more', { hasText: 'Per-byte detail' }).locator('summary').click();
+    const firstPeak = Number(
+      await page.locator('#dca-inspect table.matrix.detail tbody tr').first().locator('td').nth(1).innerText(),
+    );
+    expect(firstPeak).toBeGreaterThan(1);
+  });
+});
+
+test.describe('reproducible run links', () => {
+  test('a link carries a key the PAGE chose, and never one the reader typed', async ({ page }) => {
+    await boot(page);
+    await setSeed(page, 'link-seed');
+    await build(page, 'remote-output');
+    await page.fill('#traces', '512');
+
+    // A key the reader typed does not travel -- and `build` above types one, so
+    // this is the state a reader reaches by using the field at all.
+    await page.locator('#copy-run-link').click();
+    await expect(page.locator('#share-status')).toContainText('NOT the key you typed');
+    await expect(page.locator('#share-status')).toContainText('should not put a reader');
+
+    // A key the PAGE chose does. Asserted on the NOTE rather than on the word
+    // "Copied", because a headless browser will not hand the page a clipboard
+    // and the note is what matters either way.
+    await afterRun(page, 'build-status', () => page.locator('#generate-key').click());
+    await page.locator('#copy-run-link').click();
+    await expect(page.locator('#share-status')).toContainText('The link carries the key');
+    await expect(page.locator('#share-status')).toContainText('not secret');
+  });
+
+  test('opening a link reproduces the settings it carried', async ({ page }) => {
+    await page.goto(
+      './?seed=shared-seed&key=2b7e151628aed2a6abf7158809cf4f3c&placement=compiled-in&traces=768&surface=input&targets=sbox-output,inverse&bits=3&score=extremity',
+    );
+    await expect(page.locator('#build-verdict .pill-text')).toHaveText('IT IS AES-128');
+    await expect(page.locator('#key-hex')).toHaveValue('2b7e151628aed2a6abf7158809cf4f3c');
+    await expect(page.locator('#seed')).toHaveValue('shared-seed');
+    await expect(page.locator('input[name="placement"]:checked')).toHaveValue('compiled-in');
+    await expect(page.locator('#traces')).toHaveValue('768');
+    await expect(page.locator('#target-sbox')).toBeChecked();
+    await expect(page.locator('#target-inverse')).toBeChecked();
+    await expect(page.locator('#bit-select')).toHaveValue('3');
+    await expect(page.locator('#distinguisher-select')).toHaveValue('extremity');
+    await expect(page.locator('#build-out')).toContainText('NOT secret');
+  });
+
+  test('a link full of nonsense is ignored rather than trusted', async ({ page }) => {
+    await page.goto('./?key=not-a-key&placement=banana&traces=999999&bits=99&score=magic&surface=sideways');
+    await expect(page.locator('#build-verdict .pill-text')).toHaveText('IT IS AES-128');
+    // Every rejected parameter falls back to the shipped default.
+    await expect(page.locator('#key-hex')).toHaveValue('000102030405060708090a0b0c0d0e0f');
+    await expect(page.locator('input[name="placement"]:checked')).toHaveValue('none');
+    await expect(page.locator('#traces')).toHaveValue('384');
+    await expect(page.locator('#bit-select')).toHaveValue('all');
+    await expect(page.locator('#distinguisher-select')).toHaveValue('peak');
+    await expect(page.locator('input[name="surface"]:checked')).toHaveValue('input');
+  });
+});
+
 test.describe('the sweep', () => {
   test('measures all seven combinations and ends on the state the claim is about', async ({ page }) => {
     test.setTimeout(600_000);
@@ -793,6 +1039,12 @@ test.describe('retirement and the no-op guard', () => {
 test.describe('scope, persistence and hidden content', () => {
   test('the honest framing is on the page, in the words the template asks for', async ({ page }) => {
     await boot(page);
+    // The summary is visible without opening anything; the detail is one click
+    // away and still on the page.
+    const summary = (await page.locator('#scope-summary').innerText()).replace(/\s+/g, ' ');
+    expect(summary).toContain('Not production crypto');
+    expect(summary).toContain('instrumenting itself');
+    for (const d of await page.locator('#scope details.more').all()) await d.locator('summary').click();
     const scope = (await page.locator('#scope').innerText()).replace(/\s+/g, ' ');
     expect(scope).toContain('Not production crypto');
     expect(scope).toContain('Do not use it to protect anything');
@@ -828,6 +1080,25 @@ test.describe('scope, persistence and hidden content', () => {
         .map((el) => el.tagName + '.' + el.className),
     );
     expect(painting).toEqual([]);
+  });
+
+  test('nothing on the page renders the word "undefined" or "null"', async ({ page }) => {
+    // A guard for a whole class of silent failure. The production bundle turns a
+    // module-level `const` into a `var`, so a declaration used before its line is
+    // reached gives `undefined` rather than a temporal-dead-zone error -- and
+    // `Node.append(undefined)` puts the five characters "undefined" on the page.
+    // That really happened here, to act 2's share control.
+    await boot(page);
+    await build(page, 'none');
+    await trace(page, 64);
+    await attack(page, 'input');
+    for (const d of await page.locator('details.more').all()) await d.locator('summary').click();
+    const text = await page.locator('#app').innerText();
+    expect(text, 'a bare "undefined" on the page is a declaration used before it was initialised').not.toMatch(
+      /\bundefined\b/,
+    );
+    expect(text).not.toMatch(/\bNaN\b/);
+    expect(text).not.toMatch(/\[object Object\]/);
   });
 
   test('the scripture footer is the last visible element, verbatim and once', async ({ page }) => {

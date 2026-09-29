@@ -1,8 +1,19 @@
 # Glass Box
 
-**Chow-style white-box AES-128, built in your browser and broken in two different ways.**
+**Chow-style white-box AES-128, built in your browser and attacked from two
+directions: a statistical attack that takes the key out of a few hundred
+execution traces, and an algebraic one that strips the encodings off the tables
+without running the program at all.**
 
 [Live demo](https://systemslibrarian.github.io/crypto-lab-glass-box/)
+
+![256 candidate values for one key byte competing on the left, one standing well
+clear of the dashed second-best line; on the right the same traces split by the
+bit that candidate predicts, with one column of samples separating light from
+dark and the two group means pulling apart beneath it.](public/og-image.png)
+
+*Rendered from a live run by `npm run og`, not drawn — so the picture cannot
+drift away from what the page does.*
 
 ---
 
@@ -20,7 +31,17 @@ construction everything since is built on: **do not store the key at all**. Rewr
 AES as a network of lookup tables, build each table with the round key already
 folded in, and scramble every value passing between tables with a secret random
 bijection so no intermediate is a plain AES value either. This lab builds that,
-for real, from a key you choose, and then takes the key back out of it twice.
+for real, from a key you choose, and then attacks it from both directions the
+literature takes.
+
+**Be precise about what each one reaches.** Differential computation analysis, in
+Act 4, recovers the key: all sixteen bytes, from a few hundred traces of the
+program's own table lookups. The algebraic attack in Act 6 runs step A1 of BGE
+and recovers the round's output ENCODINGS from the tables, with no traces at all
+— which is the foundation the published attack builds on to reach the key, and
+the reaching is not implemented here. Two attack families, two different things
+recovered on this page, and the README says which is which because a demo that
+blurs them is teaching the wrong thing.
 
 **The primitives, exactly.** AES-128 as FIPS 197 defines it, with the S-box
 assembled from the GF(2^8) multiplicative inverse and the section 5.1.1 affine map
@@ -60,6 +81,12 @@ performs it, rather than a separate document that could drift from the code.
 
 ## Exhibits
 
+There is a guided route across the top of the page: one primary action, a rail
+showing the five stages, and a next step chosen from what your last run actually
+produced. It guides without gating — every act, control, derivation and caveat
+below is on the page and reachable at all times, and the route never presses a
+button for you, because causing the failure is the point.
+
 1. **The white-box threat model.** Plain language, no hex: what the attacker can
    do, and why "do not store the key" is a structural claim rather than a
    difficulty claim.
@@ -80,10 +107,19 @@ performs it, rather than a separate document that could drift from the code.
    SubBytes output and the multiplicative inverse inside it — which can be
    combined. A sixteen-cell strip shows what was recovered, what was missed, and
    the margin between each byte's best and second-best candidate, computed without
-   the key. And the mechanism itself: the same traces split by the predicted bit,
-   with the two group means drawn beneath as a pair of bars per sample. Under the
-   value the attack chose, one pair pulls apart. Under a deliberately wrong value,
-   every pair stays level.
+   the key. And the mechanism itself, beside the result: the same traces split by
+   the predicted bit, with the two group means drawn beneath as a pair of bars per
+   sample. Under the value the attack chose, one pair pulls apart. Under a
+   deliberately wrong value, every pair stays level.
+
+   Underneath it, **Bos et al.'s Tables 1 and 2, rebuilt on your own instance**:
+   the rank of the true byte under every target and prediction bit. Their
+   observation is that a bit which does not leak usually ranks the true byte
+   *last* rather than at random, and that this too can be used to recover the key.
+   It reproduces here — about 90 per cent of cells sit at rank 1 or rank 256 where
+   an even spread would give 0.8 per cent — and it is offered as a second
+   distinguisher you can select and measure. It needs more traces than the
+   ordinary reading, and the page says so.
 5. **What actually stops it: where the encoding lives.** Five states, each
    measured rather than asserted, accumulating into a comparison table: no
    external encodings; encodings compiled into the program; and encodings applied
@@ -150,6 +186,14 @@ gets wrong if you are not careful.**
   traced, cannot refuse to run, and raises nothing while its key is being
   extracted. Every failure code this page can show belongs to the page's own input
   validation, and the scope card says so in the same table.
+- **Even the attack's failures leak.** Bos et al. noticed that a prediction bit
+  which does not leak usually ranks the true key byte *last* of the 256
+  candidates rather than at random, because the correct guess is the one sitting
+  at a difference of means of nearly zero while every wrong guess picks up
+  spurious correlation with the known input. Act 4 rebuilds their table on your
+  instance and lets you score by anomaly instead of by correlation: at 2,048
+  traces that alone recovers all sixteen bytes on this generator. There is no
+  setting here that produces no information.
 - **A confident-looking answer can still be wrong.** The margin between a byte's
   best and second-best candidate is computed without the key, so it is the
   confidence an attacker really has — and on this generator every byte above a
@@ -202,10 +246,38 @@ npm test             # the unit and correctness suite
 npm run build        # typecheck, then production build
 npm run test:a11y    # WCAG 2.1 A/AA gate against the production build
 npm run test:claims  # does the page tell the truth?
+npm run og           # re-render the social preview card from a live run
 ```
 
 `npm run test:a11y` and `npm run test:claims` build the site and serve it on port
 4685 before running, so what they judge is what ships.
+
+---
+
+## Primary Sources, and What Was Checked Against Them
+
+Every central historical claim on this page names the section it comes from, and
+those sections were read rather than repeated. What was verified, and where:
+
+| Claim | Verified in |
+|---|---|
+| The construction: T-boxes, Ty_i, nibble XOR tables, 8-bit encodings built from two 4-bit ones, 32-bit from eight | Muir, ePrint 2013/104, sections 3.2–3.5 and 4.1 |
+| 144 8×8 mixing bijections (rounds 2–10) and 36 32×32 ones (rounds 1–9); none at the round-1 T-box inputs | Muir, section 4.2 |
+| External encodings are G ∘ E_k ∘ F⁻¹ | Muir §4.3; Bos et al. §2 |
+| DCA is scoped to "at most a single remotely handled external encoding" — and with both sides remote "the implementation is not a white-box implementation of a standard algorithm … but of a modified algorithm" | Bos et al., introduction and §2 |
+| External encodings compiled into the binary made no difference, "since in both cases we have knowledge of the original plaintexts before any encoding is applied" | Bos et al. §5.4 |
+| 15 of 16 bytes from the SubBytes target at 2,000 traces; 16 of 16 from the inverse target, at about 500; "combining both attacks, we could always recover the full key" | Bos et al. §5.4, Tables 1 and 2 |
+| A non-leaking bit ranks the true byte 256th "rather than being at a random position", and this "can also be used to recover the key" | Bos et al. §5.4, under Tables 1 and 2 |
+| The one challenge DCA could not break had encodings that were not in the binary — and was broken by an algebraic attack instead | Bos et al. §5.5 |
+| External encodings as a countermeasure "move the problem": the adversary can often learn them from the surrounding framework | Bos et al. §6 |
+| BGE's 2³⁰: about 2²⁴ per output encoding, 16 × 2²⁴ = 2²⁸ per round, three rounds < 2³⁰, recovering two round keys | Muir, section 5.1 |
+| BGE step A1: the group of 256 bijections, its basis, and Q̃(ψ(g)) = g(00) | Muir, section 5.1 — and this lab's A1 implements exactly that |
+
+One figure was not aimed for and corroborates the build anyway: Bos et al. record
+832 kbits of first-round traces over 500 runs, which is 1,664 bits per trace.
+This lab records 1,792 bits for its own first round — two independent
+implementations of the same construction, recording the same round, within eight
+per cent of each other.
 
 ---
 
@@ -231,10 +303,10 @@ npm run test:claims  # does the page tell the truth?
 
 ## Build & Verify
 
-**157 tests, all executed, none skipped.**
+**170 tests, all executed, none skipped.**
 
-- **117 unit tests** (Vitest, `src/**/*.test.ts`).
-- **37 claims tests** (Playwright, `e2e/claims.spec.ts`) — checking that the page
+- **121 unit tests** (Vitest, `src/**/*.test.ts`).
+- **46 claims tests** (Playwright, `e2e/claims.spec.ts`) — checking that the page
   tells the truth, by comparing values the page itself printed and re-deriving its
   claims from what is on screen.
 - **3 accessibility tests** (Playwright + `@axe-core/playwright`,
@@ -263,7 +335,19 @@ npm run test:claims  # does the page tell the truth?
   `src/attack/isolation.test.ts` reads their imports and enforces it, and proves
   the check bites on a fabricated import.
 - **Invariant I3** — `runDca` returns a committed answer and takes no argument it
-  could reach the key through; `judgeRecovery` is a separate call.
+  could reach the key through; `judgeRecovery` is a separate call, and so is the
+  rank table, which is read out of the committed scoring afterwards.
+- **The rank-extremity observation reproduces** — about 90 per cent of (bit, key
+  byte) pairs rank the true byte at 1 or 256 where an even spread would give 0.8
+  per cent, and scoring by anomaly alone recovers all sixteen bytes at 2,048
+  traces. The test also asserts the honest other half: at 384 traces it is
+  measurably worse than the ordinary reading.
+- **The guided route completes** — a Playwright journey presses nothing but the
+  one button the page offers next, at 1440×900 and at 390×844, and asserts that
+  the first such button is above the fold before it starts.
+- **A run link round-trips** — the settings it carries are reapplied, a key the
+  reader typed is not in it, and a link full of nonsense falls back to the
+  shipped defaults rather than trusting any of it.
 - **BGE step A1 is correct, not merely self-consistent** — the recovered map
   composed with the true encoding is verified to be GF(2)-affine over all 2^16
   pairs, on four rounds and four columns; and a one-swap perturbation of the
@@ -280,8 +364,7 @@ npm run test:claims  # does the page tell the truth?
 implementations they attacked, not about this one: 15 of 16 bytes from one target
 on one instance at 2,000 traces, 16 of 16 using the multiplicative-inverse target,
 and the full key whenever the two were combined across the instances they tested.
-Those figures are carried here at second hand rather than re-read out of the paper
-while this lab was built, and they are marked as such on the page too. Everything
+Those are quoted from section 5.4 of the paper, verbatim on the page. Everything
 this lab asserts on its own account, it measured.
 
 **Accessibility gate.** `@axe-core/playwright` scans the production build for zero

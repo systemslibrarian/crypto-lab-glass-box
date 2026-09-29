@@ -145,6 +145,25 @@ body {
   line-height: 1.5;
 }
 @media (max-width: 640px) {
+  /*
+   * Tighter, so the guided route's first action lands inside the first viewport
+   * on a phone rather than exactly on its edge. Measured: at 390 x 844 the
+   * button's top was at 796px of 844 before this block and 736px after it.
+   * Nothing is hidden or moved -- only the space between things is smaller,
+   * which is the one lever that does not cost a reader any content.
+   */
+  .cl-hero {
+    margin: 0.75rem 0 1rem;
+  }
+  .cl-hero-desc {
+    margin-top: 0.45rem;
+  }
+  .cl-hero-why {
+    padding: 0.7rem 0.9rem;
+  }
+  .cl-hero-why-text {
+    font-size: 0.9rem;
+  }
   .cl-hero {
     flex-direction: column;
   }
@@ -165,6 +184,160 @@ body {
   }
 }
 
+/* ── the act navigator ───────────────────────────────────────────────────── */
+
+/*
+ * Sticky BELOW the shared top bar. `--topbar-h` is measured from that bar at run
+ * time rather than assumed, because the bar is copied from a sibling lab and its
+ * height is not this repo's to hard-code. The fallback keeps the nav usable if
+ * the measurement never runs.
+ */
+:root {
+  --topbar-h: 63px;
+}
+#app .act-nav {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 900;
+  display: flex;
+  gap: 0.15rem;
+  overflow-x: auto;
+  background-color: var(--bg);
+  border-bottom: 1px solid var(--border);
+  margin: 0 calc(-1 * clamp(1rem, 3vw, 2rem));
+  padding: 0 clamp(1rem, 3vw, 2rem);
+  scrollbar-width: thin;
+}
+#app .act-nav a {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+#app .act-nav a:hover {
+  color: var(--text);
+}
+#app .act-nav a[aria-current='true'] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+/* Anchored sections must clear both sticky bars when jumped to. */
+#app .act,
+#app .guide {
+  scroll-margin-top: calc(var(--topbar-h) + 3rem);
+}
+
+/* ── the guided route ────────────────────────────────────────────────────── */
+
+/*
+ * A rail, not a mode. Nothing on this page is hidden behind it: it names the one
+ * action worth taking next and shows where that sits in the whole story, and
+ * every act below is reachable and complete at all times.
+ */
+#app .guide {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background-color: var(--panel-2);
+  padding: clamp(0.9rem, 2.2vw, 1.35rem);
+  margin: 0 0 1.5rem;
+}
+#app .guide-h {
+  margin: 0;
+  font-size: clamp(1.05rem, 2.2vw, 1.35rem);
+  line-height: 1.25;
+}
+#app .guide-lead {
+  margin: 0.5rem 0 0.9rem;
+  color: var(--text-dim);
+  max-width: 70ch;
+}
+@media (max-width: 640px) {
+  #app .guide {
+    padding: 0.8rem 0.85rem;
+  }
+  #app .guide-lead {
+    margin: 0.4rem 0 0.7rem;
+    font-size: 0.93rem;
+  }
+  #app .guide-action {
+    margin-bottom: 0.7rem;
+  }
+}
+#app .guide-action {
+  margin-bottom: 0.9rem;
+}
+#app .guide-action .btn {
+  font-size: 1rem;
+  padding: 0.65rem 1.25rem;
+  min-height: 3rem;
+}
+#app ol.rail,
+#app .rail {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.5rem;
+  padding: 0;
+  margin: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+}
+#app .rail-step {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  padding: 0.15rem 0.5rem 0.15rem 0.35rem;
+  border-radius: 6px;
+}
+#app .rail-step + .rail-step::before {
+  content: '';
+  border-left: 1px solid var(--border);
+  align-self: stretch;
+  margin-right: 0.5rem;
+}
+#app .rail-step .rail-label {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#app .rail-step.is-done {
+  color: var(--ok);
+}
+#app .rail-step.is-active {
+  color: var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+#app .rail-step.is-active .rail-label {
+  font-weight: 700;
+}
+#app .rail-state {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The one obvious thing to do next, chosen from what the last run produced. */
+#app .next-action {
+  border: 1px solid var(--accent);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background-color: var(--panel-2);
+  padding: 0.8rem 1rem;
+  margin: 1rem 0;
+}
+#app .next-lead {
+  margin: 0 0 0.7rem;
+  max-width: 78ch;
+}
+
 /* ── acts and panels ─────────────────────────────────────────────────────── */
 
 /*
@@ -173,7 +346,6 @@ body {
  */
 #app .act {
   margin: 2.5rem 0 0;
-  scroll-margin-top: 5rem;
 }
 #app .act-kicker {
   margin: 0;
@@ -243,6 +415,20 @@ body {
   font-family: var(--mono);
   font-size: 0.87rem;
   min-height: 1.2em;
+}
+/*
+ * `overflow-wrap: anywhere` on all three, and not as a precaution. A status line
+ * can hold a run link and an error line can hold a value the reader typed, and
+ * neither has a space in it -- an unbreakable 200-character token pushes the
+ * whole document sideways and fails WCAG 1.4.10. The reflow oracle in e2e/ found
+ * it here, indirectly: the overflowing box is the TEXT inside the paragraph, so
+ * the paragraph's own rect still measures 348px and the walk names the wrong
+ * element.
+ */
+#app .status,
+#app .error,
+#app .hint {
+  overflow-wrap: anywhere;
 }
 #app .status {
   margin: 0.5rem 0 0;
@@ -604,6 +790,29 @@ body {
   color: var(--text-dim);
   font-size: 0.9rem;
   max-width: 70ch;
+}
+
+/*
+ * The rank table. Colour carries no meaning on its own here either: 1 and 256
+ * are both printed as numbers, and the caption says what each end means.
+ */
+#app table.matrix.ranks {
+  min-width: 52rem;
+}
+#app table.matrix.ranks td {
+  text-align: right;
+  padding: 0.3rem 0.5rem;
+}
+#app .rank-alarm {
+  color: var(--alarm);
+  font-weight: 700;
+}
+#app .rank-warn {
+  color: var(--warn);
+  font-weight: 700;
+}
+#app .rank-ok {
+  color: var(--text-muted);
 }
 
 /* ── the byte strip ─────────────────────────────────────────────────────── */

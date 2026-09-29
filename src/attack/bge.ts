@@ -349,6 +349,10 @@ export function isAffineOverGF2(t: Uint8Array): boolean {
  * rather than as things this lab measured.
  */
 export const PUBLISHED_WORK_FACTORS = {
-  bge2004: { exponent: 30, source: 'Billet, Gilbert and Ech-Chatbi, SAC 2004 (abstract)' },
-  lepoint2013: { exponent: 22, source: 'Lepoint, Rivain, De Mulder, Roelse and Preneel, SAC 2013 (abstract)' },
+  bge2004: {
+    exponent: 30,
+    source:
+      'Billet, Gilbert and Ech-Chatbi, SAC 2004; the decomposition is set out in Muir, ePrint 2013/104, section 5.1',
+  },
+  lepoint2013: { exponent: 22, source: 'Lepoint, Rivain, De Mulder, Roelse and Preneel, SAC 2013' },
 } as const;

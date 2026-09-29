@@ -24,6 +24,16 @@ import type { EncodingPlacement } from '../wb/types.js';
 
 const W = 940;
 const H = 396;
+/**
+ * The narrow layout's canvas. Tall rather than wide, because the alternative --
+ * scaling the 940-unit wide diagram into a 343 CSS px phone column -- renders
+ * its 10px labels at about 3.6 CSS px, which is not a small diagram but an
+ * unreadable one. Below `NARROW_AT` the same content is laid out down the page
+ * instead, at the same text size it has on a desktop.
+ */
+const NARROW_W = 380;
+const NARROW_H = 1000;
+const NARROW_AT = 760;
 
 interface Box {
   readonly x: number;
@@ -51,6 +61,14 @@ function arrow(x1: number, y1: number, x2: number, y2: number, encoded: boolean,
   return g;
 }
 
+function arrowDown(x: number, y1: number, y2: number, encoded: boolean, label?: string): SVGElement {
+  const g = svg('g', { class: `dg-wire ${encoded ? 'dg-encoded' : 'dg-clear'}` });
+  g.append(svg('line', { x1: x, y1, x2: x, y2, class: 'dg-line-wire' }));
+  g.append(svg('polygon', { points: `${x},${y2} ${x - 5},${y2 - 8} ${x + 5},${y2 - 8}`, class: 'dg-head' }));
+  if (label) g.append(svg('text', { x: x + 12, y: (y1 + y2) / 2 + 4, class: 'dg-wire-label' }, [label]));
+  return g;
+}
+
 function tap(x: number, y: number): SVGElement {
   const g = svg('g', { class: 'dg-tap' });
   g.append(svg('circle', { cx: x, cy: y, r: 4, class: 'dg-tap-dot' }));
@@ -75,6 +93,151 @@ const DESCRIPTIONS: Record<EncodingPlacement, string> = {
     'G is held outside the program and F is not, so the value going in is a real AES plaintext and the value coming out is encoded.',
 };
 
+/**
+ * The same diagram, laid out down the page.
+ *
+ * Not a simplification: every box, every wire, the program boundary, the remote
+ * party, the tap markers and the legend are all here, and the type is the size it
+ * is on a desktop. Only the arrangement changes, because at 390 CSS px the wide
+ * arrangement is legible to nobody.
+ */
+function drawNarrow(root: SVGElement, placement: EncodingPlacement): void {
+  const inputRemote = placement === 'remote-both' || placement === 'remote-input';
+  const outputRemote = placement === 'remote-both' || placement === 'remote-output';
+  const hasIA = inputRemote || placement === 'compiled-in';
+  const hasIB = outputRemote || placement === 'compiled-in';
+
+  const x = 26;
+  const w = NARROW_W - 52;
+  let y = 8;
+
+  if (inputRemote || outputRemote) {
+    root.append(
+      boxNode(
+        { x, y, w, h: 74 },
+        'encoding party \u2014 outside the program',
+        [
+          inputRemote ? 'applies F to every input' : 'passes the input through',
+          outputRemote ? 'removes G from every output' : 'passes the output through',
+          'holds a secret, on some other machine',
+        ],
+        'dg-remote',
+      ),
+    );
+    y += 74;
+  } else {
+    root.append(svg('text', { x, y: y + 12, class: 'dg-note' }, ['Nothing is outside the program.']));
+    y += 22;
+  }
+  root.append(arrowDown(x + 28, y, y + 30, inputRemote, inputRemote ? 'F(P)' : 'P'));
+  y += 30;
+
+  // The boundary encloses everything from here to the last core box.
+  const boundaryTop = y;
+  const boxes: { title: string; lines: string[]; cls: string; encodedOut: boolean; tap: boolean }[] = [];
+  if (hasIA) {
+    boxes.push({
+      title: 'Type IA \u00d7 16, 8 \u2192 128',
+      lines: [
+        'plus a 15-step XOR tree',
+        placement === 'compiled-in' ? 'F, then F\u207b\u00b9 \u2014 they cancel' : 'strips F',
+      ],
+      cls: 'dg-ext',
+      encodedOut: true,
+      tap: true,
+    });
+  }
+  boxes.push({
+    title: 'Type II \u00d7 4, 8 \u2192 32',
+    lines: [
+      'S(x \u2295 k) for all 256 x, then',
+      'Ty\u1d62 and the 32-bit bijection MB',
+      'no box holds k \u2014 only these 256',
+    ],
+    cls: 'dg-core',
+    encodedOut: true,
+    tap: true,
+  });
+  boxes.push({
+    title: 'Type IV \u00d7 24, 8 \u2192 4',
+    lines: ['nibble XORs summing the four', 'words to MB\u00b7MixColumns'],
+    cls: 'dg-core',
+    encodedOut: true,
+    tap: true,
+  });
+  boxes.push({
+    title: 'Type III \u00d7 4, + 24 Type IV',
+    lines: ['removes MB, applies the next', 'round\u2019s 8-bit bijections'],
+    cls: 'dg-core',
+    encodedOut: true,
+    tap: true,
+  });
+  boxes.push({
+    title: 'rounds 2 to 9, then round 10',
+    lines: ['Type V \u00d7 16, 8 \u2192 8', 'round 10 has no MixColumns'],
+    cls: 'dg-core',
+    encodedOut: true,
+    tap: false,
+  });
+  if (hasIB) {
+    boxes.push({
+      title: 'Type IB \u00d7 16, 8 \u2192 128',
+      lines: [
+        'plus a 15-step XOR tree',
+        placement === 'compiled-in' ? 'G, then G\u207b\u00b9 \u2014 they cancel' : 'applies G',
+      ],
+      cls: 'dg-ext',
+      encodedOut: outputRemote,
+      tap: true,
+    });
+  }
+
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
+    const h = 26 + b.lines.length * 14;
+    root.append(boxNode({ x, y, w, h }, b.title, b.lines, b.cls));
+    if (b.tap) root.append(tap(x + w - 16, y + h - 10));
+    y += h;
+    const last = i === boxes.length - 1;
+    root.append(arrowDown(x + 28, y, y + 26, last ? b.encodedOut : true));
+    y += 26;
+  }
+  const boundaryBottom = y - 26;
+  root.insertBefore(
+    svg('rect', {
+      x: x - 14,
+      y: boundaryTop - 6,
+      width: w + 28,
+      height: boundaryBottom - boundaryTop + 12,
+      rx: 12,
+      class: 'dg-boundary',
+    }),
+    root.firstChild,
+  );
+  root.append(
+    svg('text', { x: x - 14, y: boundaryTop - 12, class: 'dg-boundary-label' }, [
+      'the program \u2014 all of it readable by the attacker',
+    ]),
+    svg('text', { x, y: y + 14, class: 'dg-line' }, [
+      outputRemote ? 'G(C) leaves \u2014 not a usable ciphertext' : 'C leaves \u2014 a real AES ciphertext',
+    ]),
+  );
+  y += 40;
+
+  const legend = svg('g', { class: 'dg-legend' });
+  legend.append(svg('line', { x1: x, y1: y, x2: x + 26, y2: y, class: 'dg-legend-encoded' }));
+  legend.append(svg('text', { x: x + 34, y: y + 4, class: 'dg-line' }, ['encoded \u2014 solid']));
+  legend.append(svg('line', { x1: x, y1: y + 20, x2: x + 26, y2: y + 20, class: 'dg-legend-clear' }));
+  legend.append(svg('text', { x: x + 34, y: y + 24, class: 'dg-line' }, ['not encoded \u2014 hollow']));
+  legend.append(svg('circle', { cx: x + 13, cy: y + 40, r: 4, class: 'dg-tap-dot' }));
+  legend.append(svg('text', { x: x + 34, y: y + 44, class: 'dg-line' }, ['tap \u2014 the tracer records this output']));
+  root.append(legend);
+  // Sized to the content, not to a fixed canvas: the number of boxes depends on
+  // the placement, and a floor would leave a column of empty pixels under the
+  // shortest one.
+  root.setAttribute('viewBox', `0 0 ${NARROW_W} ${y + 56}`);
+}
+
 export function createDiagram(): DiagramView {
   const root = svg('svg', {
     viewBox: `0 0 ${W} ${H}`,
@@ -89,8 +252,31 @@ export function createDiagram(): DiagramView {
   node.className = 'figure diagram-wrap';
   node.append(root, caption);
 
+  /**
+   * Which layout to draw. A media query rather than a container measurement,
+   * because the WCAG gate sets a viewport before it navigates and this has to
+   * be the same decision the reader's browser makes -- and because the choice is
+   * about how much horizontal room the TYPE has, which is a viewport property.
+   */
+  const narrow = (): boolean =>
+    typeof matchMedia === 'function' ? matchMedia(`(max-width: ${NARROW_AT - 1}px)`).matches : false;
+
+  let lastPlacement: EncodingPlacement = 'none';
+
   const update = (placement: EncodingPlacement): void => {
+    lastPlacement = placement;
     while (root.firstChild) root.removeChild(root.firstChild);
+    if (narrow()) {
+      root.setAttribute('viewBox', `0 0 ${NARROW_W} ${NARROW_H}`);
+      drawNarrow(root, placement);
+      root.setAttribute(
+        'aria-label',
+        `Diagram of one column of round 1, laid out vertically. ${DESCRIPTIONS[placement]}`,
+      );
+      caption.textContent = DESCRIPTIONS[placement];
+      return;
+    }
+    root.setAttribute('viewBox', `0 0 ${W} ${H}`);
     const inputRemote = placement === 'remote-both' || placement === 'remote-input';
     const outputRemote = placement === 'remote-both' || placement === 'remote-output';
     const hasIA = inputRemote || placement === 'compiled-in';
@@ -237,6 +423,14 @@ export function createDiagram(): DiagramView {
     root.setAttribute('aria-label', `Diagram of one column of round 1. ${DESCRIPTIONS[placement]}`);
     caption.textContent = DESCRIPTIONS[placement];
   };
+
+  // Redraw on a width change, so a reader who rotates a phone or resizes a
+  // window gets the layout that fits rather than the one they arrived with.
+  if (typeof matchMedia === 'function') {
+    const query = matchMedia(`(max-width: ${NARROW_AT - 1}px)`);
+    const onChange = (): void => update(lastPlacement);
+    if (typeof query.addEventListener === 'function') query.addEventListener('change', onChange);
+  }
 
   update('none');
   return { node, update };

@@ -358,11 +358,21 @@ export async function boot(page: Page, theme: 'dark' | 'light'): Promise<void> {
   await expect(page.locator('[data-negative-claim="NEG-1"]')).toHaveCount(1);
   await expect(page.locator('#scope [data-negative-claim="NEG-1"]')).toHaveCount(1);
 
+  // ── The guided route, and the act navigator ────────────────────────────
+  // The rail tracks what has been DONE, not where the reader has scrolled, so
+  // at arrival exactly one stage is complete: the page builds on load.
+  await expect(page.locator('#guide-rail [data-stage]')).toHaveCount(5);
+  await expect(page.locator('#guide-rail [data-state="done"]')).toHaveCount(1);
+  await expect(page.locator('#guide-rail [data-stage="build"]')).toHaveAttribute('data-state', 'done');
+  await expect(page.locator('#guide-rail [data-stage="trace"]')).toHaveAttribute('data-state', 'active');
+  await expect(page.locator('#guide-action button')).toHaveCount(1);
+  await expect(page.locator('#act-nav a')).toHaveCount(9);
+
   // ── Every disclosure ships shut ────────────────────────────────────────
-  // Six at arrival, not eight: act 4's curve plot and per-byte detail are built
-  // by the attack and do not exist until it has run. The drive counts them again
-  // once they do, so neither number is hard-coded twice.
-  await expect(page.locator('details.more')).toHaveCount(6);
+  // Seven at arrival, not ten: act 4's rank table, curve plot and per-byte
+  // detail are built by the attack and do not exist until it has run. The drive
+  // counts them again once they do, so neither number is hard-coded twice.
+  await expect(page.locator('details.more')).toHaveCount(7);
   await expect(page.locator('details.more[open]')).toHaveCount(0);
 
   await settle(page);
@@ -875,6 +885,14 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await runDca();
   await scanAt('DCA: both targets combined');
 
+  // The other distinguisher, which scores in different units and repaints the
+  // whole result panel with them.
+  await page.locator('#distinguisher-select').selectOption('extremity');
+  await runDca();
+  await expect(page.locator('#dca-verdict')).toBeVisible();
+  await scanAt('DCA: scored by rank extremity rather than by peak correlation');
+  await page.locator('#distinguisher-select').selectOption('peak');
+
   // -- The refusal path: no target at all ----------------------------------
   await page.locator('#target-sbox').uncheck();
   await page.locator('#target-inverse').uncheck();
@@ -890,6 +908,11 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await expect(page.locator('#dca-verdict')).toBeVisible();
   await scanAt('DCA: the output side, rounds 9 and 10');
   await page.locator('#surface-input').check();
+
+  // -- The share link, whose two outcomes are both states a reader can see ---
+  await page.locator('#copy-run-link').click();
+  await expect(page.locator('#share-status')).not.toBeEmpty();
+  await scanAt('Build: a run link copied, and the note about what it does and does not carry');
 
   // -- Act 5: the state the negative claim is about ------------------------
   await afterRun(page, 'build-status', () => page.locator('#placement-remote-both').check());
@@ -946,6 +969,10 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await page.locator('#traces-range').focus();
   await expect(page.locator('#traces-range')).toBeFocused();
   await scanAt('the range slider focused');
+
+  await page.locator('#act-nav a').first().focus();
+  await expect(page.locator('#act-nav a').first()).toBeFocused();
+  await scanAt('a link in the sticky act navigator focused');
 
   // -- Back to a plain program, traced and attacked ------------------------
   await afterRun(page, 'build-status', () => page.locator('#placement-none').check());

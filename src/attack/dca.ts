@@ -35,6 +35,37 @@ import type { DcaTarget } from '../wb/types.js';
 
 export const DCA_TARGETS: readonly DcaTarget[] = ['sbox-output', 'inverse', 'last-round'];
 
+/**
+ * How a candidate's per-(target, bit) results are combined into one score.
+ *
+ * `peak` is the ordinary reading: the best difference of means anywhere. A key
+ * byte is recovered when its correct value correlates with something in the
+ * trace.
+ *
+ * `extremity` reads the failures as well, and it is not a heuristic invented
+ * here. Bos et al. (CHES 2016, section 5.4, after Tables 1 and 2) observed that
+ * "when a target bit of a given key byte does not leak (i.e. is not ranked
+ * first) it is very often the worst candidate (ranked at the 256th position)
+ * rather than being at a random position", and that the observation "can also be
+ * used to recover the key". It reproduces here: on this generator 90 per cent of
+ * (bit, key byte) pairs rank the true byte either first or last, where a uniform
+ * distribution would put 0.4 per cent at the two extremes.
+ *
+ * WHY THE TRUE BYTE SINKS TO THE BOTTOM, which is the part worth understanding.
+ * For the correct guess at a bit that genuinely does not leak, the difference of
+ * means is near zero -- there is no correlation to find. A WRONG guess predicts a
+ * different function of the same known input, and the trace does depend on that
+ * input, so a wrong guess picks up spurious correlation. The correct byte is the
+ * one sitting at zero while the crowd has noise. So it ranks last, and being
+ * reliably last is as good as being reliably first.
+ *
+ * `extremity` therefore scores a candidate by how far from the middle of the
+ * pack it sits, summed over every (target, bit). It needs more traces than
+ * `peak` does -- measured on this generator, 2,048 recovers all sixteen bytes and
+ * 384 does not -- because it reads a weaker signal.
+ */
+export type Distinguisher = 'peak' | 'extremity';
+
 export const TARGET_LABELS: Readonly<Record<DcaTarget, string>> = {
   'sbox-output': 'SubBytes output, S(p ^ k)',
   inverse: 'multiplicative inverse inside SubBytes, (p ^ k)⁻¹',
@@ -78,6 +109,8 @@ export interface DcaRequest {
   readonly targets: readonly DcaTarget[];
   /** One bit index, or all eight. */
   readonly bits4: readonly number[];
+  /** How to combine the per-(target, bit) results. Default `peak`. */
+  readonly distinguisher?: Distinguisher;
   /**
    * `fast` scores every hypothesis at once through an XOR-convolution; `direct`
    * scores them one at a time with masked popcounts. They are required to agree
@@ -89,6 +122,7 @@ export interface DcaRequest {
 export interface DcaByteResult {
   readonly index: number;
   readonly guess: number;
+  /** The winner's score in the selected distinguisher's units. */
   readonly peak: number;
   readonly runnerUpGuess: number;
   readonly runnerUp: number;
@@ -98,8 +132,13 @@ export interface DcaByteResult {
   readonly peakSample: number;
   readonly peakTarget: DcaTarget;
   readonly peakBit: number;
-  /** |difference of means| per guess, for the plot. */
+  /** Score per guess, for the plot. */
   readonly peaks: Float32Array;
+  /**
+   * The winner's largest |difference of means|, always in those units whichever
+   * distinguisher chose it -- so the two can be compared on the same axis.
+   */
+  readonly bestDelta: number;
 }
 
 export interface DcaResult {
@@ -113,6 +152,15 @@ export interface DcaResult {
   readonly traces: number;
   readonly elapsedMs: number;
   readonly method: 'fast' | 'direct';
+  readonly distinguisher: Distinguisher;
+  /** The (target, bit) pairs that were scored, in the order the rank table uses. */
+  readonly combos: readonly { readonly target: DcaTarget; readonly bit: number }[];
+  /**
+   * Rank of each guess under each combo, 1 = largest difference of means.
+   * Laid out as `[keyByte][combo][guess]`. The page turns the true byte's row
+   * into the table Bos et al. print as their Tables 1 and 2.
+   */
+  readonly ranks: Int32Array;
 }
 
 /**
@@ -158,15 +206,29 @@ interface PeakState {
   readonly samples: Int32Array;
   readonly targets: DcaTarget[];
   readonly bits: Int32Array;
+  /**
+   * The best |difference of means| per guess PER COMBO, kept alongside the
+   * running maximum so a rank can be taken within each combo. Ranking has to
+   * happen inside a combo: peaks from different prediction bits are not on a
+   * common scale, and pooling them would rank noise against signal.
+   */
+  readonly perCombo: Float64Array[];
 }
 
-function newPeakState(fallback: DcaTarget): PeakState {
+function newPeakState(fallback: DcaTarget, combos: number): PeakState {
   return {
     peaks: new Float64Array(256),
     samples: new Int32Array(256).fill(-1),
     targets: new Array<DcaTarget>(256).fill(fallback),
     bits: new Int32Array(256).fill(-1),
+    perCombo: Array.from({ length: combos }, () => new Float64Array(256)),
   };
+}
+
+/** Rank of every guess within one combo, 1 = largest. */
+function ranksWithin(peaks: Float64Array, into: Int32Array, at: number): void {
+  const order = Array.from({ length: 256 }, (_, i) => i).sort((a, b) => peaks[b] - peaks[a]);
+  for (let i = 0; i < 256; i++) into[at + order[i]] = i + 1;
 }
 
 function offer(
@@ -176,6 +238,7 @@ function offer(
   sample: number,
   target: DcaTarget,
   bit: number,
+  combo: number,
 ): void {
   if (magnitude > state.peaks[guess]) {
     state.peaks[guess] = magnitude;
@@ -183,6 +246,7 @@ function offer(
     state.targets[guess] = target;
     state.bits[guess] = bit;
   }
+  if (magnitude > state.perCombo[combo][guess]) state.perCombo[combo][guess] = magnitude;
 }
 
 /** Count of 1 bits, for the direct scorer. */
@@ -209,8 +273,10 @@ function scoreByteDirect(
     totals[s] = total;
   }
   const selection = new Uint32Array(words);
+  let combo = -1;
   for (const target of targets) {
     for (const bit of bits4) {
+      combo++;
       for (let guess = 0; guess < 256; guess++) {
         selection.fill(0);
         let ones = 0;
@@ -229,7 +295,7 @@ function scoreByteDirect(
           let hit = 0;
           for (let w = 0; w < words; w++) hit += popcount(columns[base + w] & selection[w]);
           const delta = hit / ones - (totals[s] - hit) / zeros;
-          offer(state, guess, delta < 0 ? -delta : delta, sampleStart + s, target, bit);
+          offer(state, guess, delta < 0 ? -delta : delta, sampleStart + s, target, bit, combo);
         }
       }
     }
@@ -296,8 +362,10 @@ function scoreByteFast(
     }
     spectrumA.set(a);
     walshHadamard(spectrumA);
+    let combo = -1;
     for (const target of targets) {
       for (const bit of bits4) {
+        combo++;
         const spectrum = spectra.get(`${target}:${bit}`);
         if (!spectrum) throw new Error('missing spectrum');
         const ones = onesFor.get(`${target}:${bit}`);
@@ -310,7 +378,7 @@ function scoreByteFast(
           if (n1 === 0 || n0 === 0) continue;
           const hit = product[g] / 256;
           const delta = hit / n1 - (total - hit) / n0;
-          offer(state, g, delta < 0 ? -delta : delta, sampleStart + s, target, bit);
+          offer(state, g, delta < 0 ? -delta : delta, sampleStart + s, target, bit, combo);
         }
       }
     }
@@ -332,6 +400,8 @@ export function runDca(request: DcaRequest, onProgress?: (byteIndex: number) => 
   const startedAt = Date.now();
   const { bits, stride, traces, sampleStart, sampleCount, known, targets, bits4 } = request;
   const method = request.method ?? 'fast';
+  const distinguisher = request.distinguisher ?? 'peak';
+  const combos = targets.flatMap((target) => bits4.map((bit) => ({ target, bit })));
   if (stride % 4 !== 0) throw new Error('the trace stride must be a whole number of 32-bit words');
   if (known.length !== traces * 16) throw new Error('known must hold 16 observed bytes per trace');
   if (targets.length === 0 || bits4.length === 0) throw new Error('DCA needs at least one target and one bit');
@@ -346,20 +416,40 @@ export function runDca(request: DcaRequest, onProgress?: (byteIndex: number) => 
 
   const results: DcaByteResult[] = [];
   const recovered = new Uint8Array(16);
+  const ranks = new Int32Array(16 * combos.length * 256);
   for (let index = 0; index < 16; index++) {
-    const state = newPeakState(targets[0]);
+    const state = newPeakState(targets[0], combos.length);
     if (method === 'direct') scoreByteDirect(request, columns, words, index, state);
     else scoreByteFast(request, columns, words, index, state, spectra);
 
+    // Ranks first: the extremity distinguisher is defined on them, and the page
+    // prints the true byte's row whichever distinguisher was used.
+    for (let c = 0; c < combos.length; c++) {
+      ranksWithin(state.perCombo[c], ranks, (index * combos.length + c) * 256);
+    }
+
+    // The score the winner is chosen by. `peak` is the largest difference of
+    // means anywhere; `extremity` is how far from the middle of the pack a
+    // candidate sits, summed over combos -- see `Distinguisher`.
+    const score = new Float64Array(256);
+    if (distinguisher === 'peak') {
+      score.set(state.peaks);
+    } else {
+      for (let c = 0; c < combos.length; c++) {
+        const at = (index * combos.length + c) * 256;
+        for (let g = 0; g < 256; g++) score[g] += Math.abs(ranks[at + g] - 128.5);
+      }
+    }
+
     let winner = 0;
-    for (let guess = 1; guess < 256; guess++) if (state.peaks[guess] > state.peaks[winner]) winner = guess;
+    for (let guess = 1; guess < 256; guess++) if (score[guess] > score[winner]) winner = guess;
     let runnerUpGuess = winner === 0 ? 1 : 0;
     for (let guess = 0; guess < 256; guess++) {
       if (guess === winner) continue;
-      if (state.peaks[guess] > state.peaks[runnerUpGuess]) runnerUpGuess = guess;
+      if (score[guess] > score[runnerUpGuess]) runnerUpGuess = guess;
     }
-    const peak = state.peaks[winner];
-    const runnerUp = state.peaks[runnerUpGuess];
+    const peak = score[winner];
+    const runnerUp = score[runnerUpGuess];
     recovered[index] = winner;
     results.push({
       index,
@@ -371,7 +461,8 @@ export function runDca(request: DcaRequest, onProgress?: (byteIndex: number) => 
       peakSample: state.samples[winner],
       peakTarget: state.targets[winner],
       peakBit: state.bits[winner],
-      peaks: Float32Array.from(state.peaks),
+      peaks: Float32Array.from(score),
+      bestDelta: state.peaks[winner],
     });
     if (onProgress) onProgress(index + 1);
   }
@@ -386,6 +477,9 @@ export function runDca(request: DcaRequest, onProgress?: (byteIndex: number) => 
     traces,
     elapsedMs: Date.now() - startedAt,
     method,
+    distinguisher,
+    combos,
+    ranks,
   };
 }
 
@@ -403,7 +497,6 @@ export function dcaCurves(
   target: DcaTarget,
   bit: number,
 ): { curves: Float32Array; sampleCount: number; max: number } {
-  const state = newPeakState(target);
   const words = request.stride / 4;
   const columns = new Uint32Array(request.bits.buffer, request.bits.byteOffset, request.bits.byteLength / 4);
   const { traces, sampleStart, sampleCount, known } = request;
@@ -457,7 +550,6 @@ export function dcaCurves(
       if (magnitude > max) max = magnitude;
     }
   }
-  void state;
   return { curves, sampleCount, max };
 }
 

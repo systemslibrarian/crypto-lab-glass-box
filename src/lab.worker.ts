@@ -24,7 +24,15 @@
 
 import { aes128Encrypt, expandKey, invertKeySchedule } from './aes/aes-ref.js';
 import { runBgeStepA1, BgeError } from './attack/bge.js';
-import { CHANCE_CORRECT_BYTES, dcaCurves, judgeRecovery, predictBit, runDca, type DcaRequest } from './attack/dca.js';
+import {
+  CHANCE_CORRECT_BYTES,
+  dcaCurves,
+  judgeRecovery,
+  predictBit,
+  runDca,
+  type DcaRequest,
+  type Distinguisher,
+} from './attack/dca.js';
 import {
   LAB_FAILURE_CODES,
   MAX_TRACES,
@@ -264,6 +272,7 @@ function requestFor(
   set: TraceSet,
   targets: readonly DcaTarget[],
   bits: readonly number[],
+  distinguisher: Distinguisher,
 ): DcaRequest {
   const w = set.map.windows[windowFor(surface)];
   return {
@@ -277,6 +286,7 @@ function requestFor(
     known: surface === 'input' ? set.inputs : set.outputs,
     targets,
     bits4: bits,
+    distinguisher,
   };
 }
 
@@ -285,6 +295,7 @@ function handleDca(
   surface: AttackSurface,
   targets: readonly DcaTarget[],
   bits: readonly number[],
+  distinguisher: Distinguisher,
   curveByte: number | null,
 ): void {
   const current = session;
@@ -298,7 +309,7 @@ function handleDca(
     );
   }
 
-  const request = requestFor(surface, set, targets, bits);
+  const request = requestFor(surface, set, targets, bits, distinguisher);
   post({ kind: 'progress', id, phase: 'scoring 4,096 key hypotheses', done: 0, total: 16 });
   const result = runDca(request, (done) => {
     post({ kind: 'progress', id, phase: 'scoring 4,096 key hypotheses', done, total: 16 });
@@ -321,6 +332,7 @@ function handleDca(
     peakSample: b.peakSample,
     peakTarget: b.peakTarget,
     peakBit: b.peakBit,
+    bestDelta: b.bestDelta,
     correct: verdict.correct[b.index],
     truth: truth[b.index],
     peaks: b.peaks,
@@ -335,6 +347,20 @@ function handleDca(
     curves = { byteIndex: curveByte, target, bit, values: computed.curves, max: computed.max };
   }
 
+  // Invariant I3 again: the rank table is read out of the committed scoring, and
+  // the TRUTH is used only here, after `runDca` has returned, to say which row of
+  // each table belongs to the real key byte.
+  const combos = result.combos;
+  const trueRanks = new Int32Array(16 * combos.length);
+  let extremeRanks = 0;
+  for (let m = 0; m < 16; m++) {
+    for (let c = 0; c < combos.length; c++) {
+      const rank = result.ranks[(m * combos.length + c) * 256 + truth[m]];
+      trueRanks[m * combos.length + c] = rank;
+      if (rank === 1 || rank === 256) extremeRanks++;
+    }
+  }
+
   const hypothesisValid = surface === 'input' ? !inputIsRemote(current.placement) : !outputIsRemote(current.placement);
 
   const report: DcaReport = {
@@ -347,6 +373,10 @@ function handleDca(
     traces: set.traces,
     targets,
     bits,
+    distinguisher,
+    combos,
+    trueRanks,
+    extremeRanks,
     elapsedMs: result.elapsedMs,
     bytes,
     recoveredHex: hex(result.recovered),
@@ -511,7 +541,14 @@ self.addEventListener('message', (event: MessageEvent<LabRequest>) => {
           handleTrace(request.id, request.traces);
           break;
         case 'dca':
-          handleDca(request.id, request.surface, request.targets, request.bits, request.curveByte);
+          handleDca(
+            request.id,
+            request.surface,
+            request.targets,
+            request.bits,
+            request.distinguisher,
+            request.curveByte,
+          );
           break;
         case 'heatmap':
           handleHeatmap(
