@@ -298,6 +298,20 @@ export interface BuildInternals {
   outputByteBijection(round: number, column: number, row: number): Uint8Array;
 }
 
+// [extension] point -- TWO THINGS THIS FUNCTION IS THE SEAM FOR.
+//
+// A MASKED white-box variant splits every value on every wire into shares and
+// builds the tables over the shares. It changes `buildNetwork` and nothing
+// else: the evaluator, the tracer and both attacks work on whatever tables they
+// are handed, which is why they take tables rather than a generator.
+//
+// IMPORTING SOMEONE ELSE'S TABLES -- the SideChannelMarvels "Deadpool"
+// challenge set is the obvious source -- needs a loader that produces a
+// `WhiteBoxNetwork` without a key, plus a `BuildReport` that admits there is no
+// ground truth to compare a recovery against, so invariant I3's reveal has to
+// become "here is what came out" rather than "here is what came out, and it is
+// right". Check each challenge's licence before shipping its tables.
+
 export interface BuildResult {
   readonly network: WhiteBoxNetwork;
   readonly handover: ExternalEncodingHandover;

@@ -204,7 +204,7 @@ npm run test:claims  # does the page tell the truth?
 ```
 
 `npm run test:a11y` and `npm run test:claims` build the site and serve it on port
-4646 before running, so what they judge is what ships.
+4685 before running, so what they judge is what ships.
 
 ---
 

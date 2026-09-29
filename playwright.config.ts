@@ -4,15 +4,20 @@ import { defineConfig, devices } from '@playwright/test';
  * Everything runs against the PRODUCTION build served by `vite preview`, so what
  * passes here is what ships.
  *
- * PORT 4646 is unique to this lab in committed state across the 212 sibling
- * repos, checked by grepping every sibling lab's playwright config, working
- * trees included. Never the Vite default 4173: with this many labs
- * side by side, a shared port plus `reuseExistingServer` means a run can silently
- * scan a DIFFERENT lab's preview, which has really happened in this fleet. 4646
- * sits in the middle of an unclaimed run rather than at the first-free slot
- * everyone else reaches for.
+ * PORT 4685 is unique to this lab in committed state across the 212 sibling
+ * repos. Never the Vite default 4173: with this many labs side by side, a shared
+ * port plus `reuseExistingServer` means a run can silently scan a DIFFERENT
+ * lab's preview, which has really happened in this fleet.
+ *
+ * A note on how it was checked, because the obvious survey is wrong. Grepping
+ * the siblings for `localhost:[0-9]+` misses every config that builds its URL
+ * from a `PORT` constant -- which is most of the recent ones, including this
+ * file. That survey reported 4646 free; it is not, `crypto-lab-harvest-timeline`
+ * has it. The survey that found the clash matches `localhost:`, `PORT =` and
+ * `port` alike, over committed AND working-tree copies, and it puts 182 ports in
+ * use across the fleet rather than the 97 the narrow form found.
  */
-const PORT = 4646;
+const PORT = 4685;
 const BASE = `http://localhost:${PORT}/crypto-lab-glass-box/`;
 
 export default defineConfig({

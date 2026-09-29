@@ -161,6 +161,14 @@ function xorBlock(
   }
 }
 
+// [extension] point -- DIFFERENTIAL FAULT ANALYSIS.
+// `runNetwork` below is the single place every table lookup result passes
+// through. A fault-injection mode would take a (round, column, row, bit)
+// address and flip that bit on the way out, which is enough for DFA on the
+// last two rounds; the honest framing it would need is that a white-box
+// attacker can inject a fault by editing the tables, so the fault model here is
+// stronger than a physical one rather than a simulation of it.
+
 /** Scratch space one evaluation needs, allocated once per worker call. */
 export interface RunScratch {
   readonly stage16: Uint32Array;

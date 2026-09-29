@@ -221,9 +221,6 @@ function hero(): HTMLElement {
 }
 
 app.append(hero(), main);
-main.append(el('div', { id: 'boot', class: 'panel' }, [el('p', {}, ['Loading the lab…'])]));
-
-export {};
 // ── Scope: what is real, what is not, and what this does not prove ──────────
 
 /**

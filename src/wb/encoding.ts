@@ -27,6 +27,15 @@ export type Nibble = Uint8Array;
 /** One value in transit, as the nibble bijections encoding it. */
 export type Wire = readonly Nibble[];
 
+// [extension] point -- WIDER INTERNAL ENCODINGS.
+// These three constants are the whole of "Chow's encodings are 4 bits wide". A
+// byte-encoded variant replaces the per-nibble bijection tables with 256-entry
+// ones and halves these counts, and then wants a Rivain-Wang-style attack panel
+// beside Act 4, because plain first-order DCA is exactly what stops working
+// there and the point of building it would be to show what replaces it. What
+// must NOT happen alongside it is the page implying that wider encodings are
+// safe: Rivain and Wang broke a byte-encoded implementation that DCA had failed
+// on, and Act 7 says so today.
 export const NIBBLES_PER_BYTE = 2;
 export const NIBBLES_PER_WORD = 8;
 export const NIBBLES_PER_BLOCK = 32;
