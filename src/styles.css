@@ -148,6 +148,17 @@ body {
   .cl-hero {
     flex-direction: column;
   }
+  /*
+   * The `flex: 1 1 22rem` the template gives `.cl-hero-main` is a WIDTH basis,
+   * and in a column container the basis is the HEIGHT -- so the title block
+   * reserves 352px of vertical space it does not use and the why-box floats
+   * a long way below the description. The template's snippet already resets
+   * `.cl-hero-why` here and simply does not reset its sibling; this is the
+   * matching reset.
+   */
+  .cl-hero-main {
+    flex: 0 0 auto;
+  }
   .cl-hero-why {
     flex-basis: auto;
     width: 100%;
