@@ -280,6 +280,9 @@ npm run test:claims  # does the page tell the truth?
 implementations they attacked, not about this one: 15 of 16 bytes from one target
 on one instance at 2,000 traces, 16 of 16 using the multiplicative-inverse target,
 and the full key whenever the two were combined across the instances they tested.
+Those figures are carried here at second hand rather than re-read out of the paper
+while this lab was built, and they are marked as such on the page too. Everything
+this lab asserts on its own account, it measured.
 
 **Accessibility gate.** `@axe-core/playwright` scans the production build for zero
 WCAG 2.1 A/AA violations and zero unexplained `incomplete` results, alongside a

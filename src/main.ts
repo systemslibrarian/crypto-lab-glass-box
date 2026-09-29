@@ -1581,7 +1581,7 @@ function placementSection(): HTMLElement {
           'Two different kinds of number, kept apart on purpose. Measured here, over five instances at 384 traces, attacking the input side with all eight prediction bits: 12 to 16 bytes of 16 from the SubBytes-output target alone, 13 to 16 from the inverse target alone, 14 to 16 with the two combined, and 15 to 16 combined at 1,024 traces. Those are properties of this generator at those trace counts, not of Chow’s construction.',
         ]),
         el('p', {}, [
-          'Reported by Bos, Hubain, Michiels and Teuwen (CHES 2016) about the implementations they attacked: 15 of 16 bytes from one target on one instance at 2,000 traces, 16 of 16 using the multiplicative-inverse target, and the full key whenever the two were combined across the instances they tested. Their figures, their implementations.',
+          'Reported by Bos, Hubain, Michiels and Teuwen (CHES 2016) about the implementations they attacked: 15 of 16 bytes from one target on one instance at 2,000 traces, 16 of 16 using the multiplicative-inverse target, and the full key whenever the two were combined across the instances they tested. Their figures, their implementations — and carried here at second hand, not re-read out of the paper by this lab. The numbers above them are the ones this page measured, and those are the ones it stands behind.',
         ]),
         el('p', {}, [
           'One result on this page is neither: attacking the OUTPUT side recovers only part of the last round key, and the part it recovers does not complete. The reason is structural and worth knowing. Chow’s first-round tables are 8 → 32, so a first-round key byte is exposed through eight encoded nibbles; his round-10 tables are 8 → 8, so a last-round key byte is exposed through two. Four times fewer places for a correlation to be. And inverting the AES-128 key schedule needs all sixteen bytes of k¹⁰, so a partial recovery of it yields nothing about the key.',
@@ -1770,7 +1770,7 @@ function bgeSection(): HTMLElement {
       ],
       [
         'What the published attack covers',
-        'Chow’s construction including the external input and output encodings Chow specifies. Scoped to that construction — not to arbitrary external encodings in other designs.',
+        'Chow’s construction including the external input and output encodings Chow specifies — reported at second hand rather than read out of the paper here, and scoped to that construction rather than to arbitrary external encodings in other designs.',
       ],
       ['What runs here', 'Step A1 only, live, on the tables this page built, with zero traces.'],
     ]),
