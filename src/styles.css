@@ -1,0 +1,840 @@
+/*
+ * Glass Box.
+ *
+ * Dark is the only theme. There is no toggle, no `prefers-color-scheme`, and no
+ * `:root[data-theme="light"]` block -- `index.html` pins `data-theme="dark"`
+ * before first paint and the palette below is the whole of it.
+ *
+ * THE PALETTE IS ARITHMETIC, NOT TASTE. Every pair below was computed against
+ * WCAG 2.1's formulas before it was typed, because the gate in `e2e/` measures
+ * ratios rather than trusting tokens:
+ *
+ *   --text      on --panel   15.7:1      --text-dim  on --panel    9.2:1
+ *   --text-muted on --panel   6.0:1      --accent    on --panel   13.0:1
+ *   --accent-ink on --accent 11.5:1      --ok-ink    on --ok       9.4:1
+ *   --alarm-ink on --alarm    8.1:1      --warn-ink  on --warn    10.8:1
+ *
+ * There are TWO edge tokens and the difference is deliberate. `--border`
+ * delineates panels, tables and figures, which are not UI components under WCAG
+ * 1.4.11 and are not judged by `e2e/nontext.ts`. `--edge` delineates every
+ * button, input and select, which are, and it measures 5.3:1 or better against
+ * all three surfaces, so no control can acquire an edge that fails. A single
+ * token would have forced panel rules to be as loud as control rules; two
+ * tokens with a stated boundary is the version that stays honest.
+ *
+ * Muted text lowers LIGHTNESS rather than reaching for `opacity`, because
+ * opacity composites over whatever is behind and makes the measured ratio a
+ * property of the stacking context instead of the token.
+ */
+
+/*
+ * Border-box everywhere. The hero CSS the template prints gives `.cl-hero-why`
+ * both `width: 100%` and a horizontal padding, which under the default
+ * `content-box` makes it 34px wider than its container -- enough to push the
+ * document sideways at 380px and fail WCAG 1.4.10, which is how this was found.
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --accent: #67e8f9;
+  --accent-ink: #04222a;
+  --bg: #080c11;
+  --panel: #0e141b;
+  --panel-2: #131c26;
+  --inset: #05080c;
+  --border: #27333f;
+  --edge: #7c8fa1;
+  --text: #e7eef5;
+  --text-dim: #a9b8c6;
+  --text-muted: #8494a3;
+  --ok: #57d9a3;
+  --ok-ink: #04231a;
+  --alarm: #ff8b8b;
+  --alarm-ink: #2b0808;
+  --warn: #ffc76b;
+  --warn-ink: #2a1c02;
+  --radius: 10px;
+  --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/*
+ * The longhand, not the `background` shorthand: axe and WebKit both miss the
+ * shorthand when they look for the root canvas colour, and a root with no
+ * measurable background is how a page reports contrast against white.
+ */
+html {
+  background-color: var(--bg);
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+}
+
+#app {
+  display: block;
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 0 clamp(1rem, 3vw, 2rem) 3rem;
+}
+
+/* ── the standardised hero ───────────────────────────────────────────────── */
+
+.cl-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: clamp(1rem, 4vw, 3rem);
+  flex-wrap: wrap;
+  margin: clamp(1rem, 3vw, 2rem) 0 1.5rem;
+}
+.cl-hero-main {
+  flex: 1 1 22rem;
+  min-width: min(100%, 20rem);
+}
+.cl-hero-title {
+  margin: 0;
+  font-size: clamp(1.6rem, 3.8vw, 2.7rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+}
+.cl-hero-sub {
+  margin: 0.4rem 0 0;
+  font-size: clamp(0.9rem, 1.6vw, 1.05rem);
+  letter-spacing: 0.01em;
+  color: var(--accent);
+  font-family: var(--mono);
+}
+.cl-hero-desc {
+  margin: 0.55rem 0 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-width: 60ch;
+}
+.cl-hero-why {
+  flex: 0 1 min(40%, 26rem);
+  min-width: min(100%, 15rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1.05rem;
+  background-color: var(--panel-2);
+}
+.cl-hero-why-label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+}
+.cl-hero-why-text {
+  margin: 0.35rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+@media (max-width: 640px) {
+  .cl-hero {
+    flex-direction: column;
+  }
+  .cl-hero-why {
+    flex-basis: auto;
+    width: 100%;
+  }
+}
+
+/* ── acts and panels ─────────────────────────────────────────────────────── */
+
+/*
+ * Scoped to `#app`. The always-dark `.cl-topbar` is self-contained, and a global
+ * `p {}` or `button {}` rule reaches into it and fights its palette.
+ */
+#app .act {
+  margin: 2.5rem 0 0;
+  scroll-margin-top: 5rem;
+}
+#app .act-kicker {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+#app h2 {
+  margin: 0.2rem 0 0;
+  font-size: clamp(1.2rem, 2.4vw, 1.6rem);
+  line-height: 1.25;
+}
+#app h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+#app h4 {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.95rem;
+  color: var(--text-dim);
+}
+#app .act-lead {
+  margin: 0.5rem 0 1rem;
+  color: var(--text-dim);
+  max-width: 72ch;
+}
+#app p {
+  margin: 0.7rem 0;
+  max-width: 78ch;
+}
+#app .panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--panel);
+  padding: clamp(0.85rem, 2vw, 1.25rem);
+  margin: 1rem 0;
+}
+#app .panel.controls {
+  background-color: var(--panel-2);
+}
+#app .honest-panel {
+  border-left: 3px solid var(--warn);
+}
+#app .fixture-panel {
+  border-left: 3px solid var(--accent);
+}
+#app .hint {
+  color: var(--text-muted);
+  font-size: 0.87rem;
+  max-width: 72ch;
+}
+#app .placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+#app .aside-note {
+  border-left: 2px solid var(--border);
+  padding-left: 0.8rem;
+  color: var(--text-dim);
+  font-size: 0.93rem;
+}
+#app .error {
+  margin: 0.5rem 0 0;
+  color: var(--alarm);
+  font-family: var(--mono);
+  font-size: 0.87rem;
+  min-height: 1.2em;
+}
+#app .status {
+  margin: 0.5rem 0 0;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  min-height: 1.2em;
+}
+#app .mono {
+  font-family: var(--mono);
+}
+#app .formula {
+  font-size: 1.02rem;
+  padding: 0.6rem 0.8rem;
+  background-color: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+#app a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── controls ────────────────────────────────────────────────────────────── */
+
+#app .control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  margin: 0.5rem 0;
+}
+#app .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: min(100%, 14rem);
+  flex: 1 1 14rem;
+}
+#app .field > label,
+#app .check > label,
+#app .radio > label {
+  font-size: 0.87rem;
+  color: var(--text-dim);
+}
+#app input[type='text'],
+#app input[type='number'],
+#app select,
+#app textarea {
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--text);
+  background-color: var(--inset);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  min-height: 2.4rem;
+  width: 100%;
+}
+#app input[aria-invalid='true'] {
+  border-color: var(--alarm);
+  border-width: 2px;
+}
+#app select.styled-select {
+  /* `appearance: none` takes the painting over, so the chevron is drawn here and
+     the boundary answers for itself. */
+  appearance: none;
+  padding-right: 2rem;
+  background-image: linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+    linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.1rem) 1.05rem,
+    calc(100% - 0.75rem) 1.05rem;
+  background-size:
+    0.36rem 0.36rem,
+    0.36rem 0.36rem;
+  background-repeat: no-repeat;
+}
+#app input[type='range'] {
+  width: 100%;
+  min-height: 2.4rem;
+  accent-color: var(--accent);
+}
+#app .btn {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  min-height: 2.6rem;
+  cursor: pointer;
+  border: 1px solid var(--edge);
+  background-color: var(--panel);
+  color: var(--text);
+}
+#app .btn.primary {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+#app .btn.danger {
+  background-color: var(--alarm);
+  border-color: var(--alarm);
+  color: var(--alarm-ink);
+}
+#app .btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+#app .btn.primary:hover:not(:disabled) {
+  background-color: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+#app .btn:disabled {
+  cursor: default;
+  color: var(--text-muted);
+  border-color: var(--border);
+  background-color: var(--panel);
+}
+#app .btn.primary:disabled {
+  background-color: var(--border);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+#app fieldset.radios {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0.8rem 0;
+  padding: 0.6rem 0.9rem 0.9rem;
+}
+#app fieldset.radios legend {
+  padding: 0 0.4rem;
+  font-size: 0.87rem;
+  color: var(--text-dim);
+}
+#app .radio-group-label {
+  margin: 0.7rem 0 0.2rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+#app .radio,
+#app .check {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  margin: 0.3rem 0;
+}
+#app .radio input,
+#app .check input {
+  margin-top: 0.35rem;
+  accent-color: var(--accent);
+  min-width: 1rem;
+  min-height: 1rem;
+}
+#app .radio-note {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+#app .check-row {
+  display: block;
+}
+#app :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── tables, lists and definition lists ─────────────────────────────────── */
+
+#app .scroller {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--inset);
+  margin: 0.8rem 0;
+}
+#app table.matrix {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 40rem;
+  font-size: 0.87rem;
+}
+#app table.matrix caption {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+#app table.matrix th,
+#app table.matrix td {
+  border-top: 1px solid var(--border);
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+#app table.matrix thead th {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+#app table.matrix tbody th {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+#app .cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+#app .cell-sub {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+#app dl.defs {
+  display: grid;
+  grid-template-columns: minmax(10rem, 22rem) 1fr;
+  gap: 0.3rem 1rem;
+  margin: 0.8rem 0;
+  font-size: 0.9rem;
+}
+#app dl.defs dt {
+  color: var(--text-muted);
+}
+#app dl.defs dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  #app dl.defs {
+    grid-template-columns: 1fr;
+    gap: 0 0;
+  }
+  #app dl.defs dd {
+    margin-bottom: 0.55rem;
+  }
+}
+#app ul.plain-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0;
+}
+#app ul.plain-list > li {
+  position: relative;
+  padding-left: 1.1rem;
+  margin: 0.4rem 0;
+  max-width: 80ch;
+  color: var(--text-dim);
+}
+#app ul.plain-list > li::before {
+  /* Generated content is measured at 4.5:1 by e2e/nontext.ts; the accent on a
+     panel is 13:1. */
+  content: '\2013';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+#app ul.check-list > li {
+  padding-left: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.7rem;
+  align-items: baseline;
+  color: var(--text);
+}
+#app ul.check-list > li::before {
+  content: none;
+}
+#app .check-label {
+  font-weight: 600;
+}
+#app .check-detail {
+  grid-column: 2;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+}
+#app details.more {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--panel-2);
+  padding: 0.5rem 0.9rem;
+  margin: 1rem 0;
+}
+#app details.more > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--accent);
+  padding: 0.25rem 0;
+}
+#app details.more > .more-body {
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+
+/* ── verdicts: icon, word and colour together (WCAG 1.4.1) ──────────────── */
+
+#app .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.18rem 0.65rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+/*
+ * A verdict is a sentence, and some of this lab's are long -- "DCA DEFEATED --
+ * AND THE ENCODINGS RECOVERED ANYWAY" is the whole point of act 5 and will not
+ * be shortened to fit a phone. `nowrap` keeps the pill tidy where there is room
+ * and pushes the document sideways where there is not, which fails WCAG 1.4.10.
+ * Below 720px it wraps, and the radius comes down so a two-line pill still looks
+ * like a deliberate shape.
+ */
+@media (max-width: 720px) {
+  #app .pill {
+    white-space: normal;
+    border-radius: 10px;
+    align-items: flex-start;
+  }
+  #app .pill-glyph {
+    padding-top: 0.1rem;
+  }
+}
+#app .pill-ok {
+  background-color: var(--ok);
+  color: var(--ok-ink);
+}
+#app .pill-alarm {
+  background-color: var(--alarm);
+  color: var(--alarm-ink);
+}
+#app .pill-warn {
+  background-color: var(--warn);
+  color: var(--warn-ink);
+}
+#app .pill-info {
+  background-color: var(--accent);
+  color: var(--accent-ink);
+}
+#app .verdict-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.9rem;
+  align-items: baseline;
+  margin: 0.6rem 0;
+}
+#app .verdict-detail {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  max-width: 70ch;
+}
+
+/* ── the byte strip ─────────────────────────────────────────────────────── */
+
+#app .byte-strip {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5.2rem, 1fr));
+  gap: 0.4rem;
+  padding: 0;
+  margin: 0.7rem 0;
+}
+#app .byte-cell {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--inset);
+  padding: 0.4rem 0.45rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 0.35rem;
+  font-size: 0.78rem;
+  align-items: baseline;
+}
+#app .byte-index {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+}
+#app .byte-value {
+  font-size: 1rem;
+  font-weight: 700;
+}
+#app .byte-glyph {
+  font-weight: 700;
+}
+#app .byte-state {
+  grid-column: 1 / -1;
+  color: var(--text-dim);
+}
+#app .byte-margin {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+}
+#app .byte-cell.tone-alarm {
+  border-color: var(--alarm);
+}
+#app .byte-cell.tone-alarm .byte-value,
+#app .byte-cell.tone-alarm .byte-glyph {
+  color: var(--alarm);
+}
+#app .byte-cell.tone-warn {
+  border-color: var(--warn);
+}
+#app .byte-cell.tone-warn .byte-value,
+#app .byte-cell.tone-warn .byte-glyph {
+  color: var(--warn);
+}
+#app .byte-cell.tone-ok .byte-value,
+#app .byte-cell.tone-ok .byte-glyph {
+  color: var(--ok);
+}
+
+/* ── figures ────────────────────────────────────────────────────────────── */
+
+#app .figure {
+  margin: 0.8rem 0;
+}
+#app canvas.plot {
+  display: block;
+  image-rendering: pixelated;
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-width: 100%;
+}
+#app .figcaption {
+  margin: 0.4rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  max-width: 80ch;
+}
+#app .two-up {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 1.2rem;
+}
+
+/* ── the diagram ────────────────────────────────────────────────────────── */
+
+#app .diagram {
+  display: block;
+  width: 100%;
+  height: auto;
+  background-color: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+#app .diagram text {
+  font-family: var(--mono);
+  fill: var(--text-dim);
+}
+#app .dg-title {
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--text);
+}
+#app .dg-line {
+  font-size: 10px;
+}
+#app .dg-note,
+#app .dg-tap-label,
+#app .dg-wire-label {
+  font-size: 10px;
+  fill: var(--text-muted);
+}
+#app .dg-keynote {
+  font-size: 10px;
+  fill: var(--warn);
+}
+#app .dg-boundary-label {
+  font-size: 11px;
+  fill: var(--accent);
+}
+#app .dg-boundary {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 7 5;
+}
+#app .dg-rect {
+  fill: var(--panel-2);
+  stroke: var(--edge);
+  stroke-width: 1;
+}
+#app .dg-remote .dg-rect {
+  fill: var(--panel);
+  stroke: var(--warn);
+  stroke-width: 1.5;
+}
+#app .dg-ext .dg-rect {
+  stroke: var(--warn);
+}
+#app .dg-line-wire {
+  stroke-width: 2;
+}
+#app .dg-encoded .dg-line-wire {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+#app .dg-encoded .dg-head {
+  fill: var(--accent);
+}
+#app .dg-clear .dg-line-wire {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+#app .dg-clear .dg-head {
+  fill: none;
+  stroke: var(--text-muted);
+}
+#app .dg-turn {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+#app .dg-tap-dot {
+  fill: var(--warn);
+}
+#app .dg-legend-encoded {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+#app .dg-legend-clear {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+/* ── the negative claim ─────────────────────────────────────────────────── */
+
+#app .neg-claim {
+  border: 1px solid var(--warn);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background-color: var(--panel-2);
+  padding: 0.7rem 1rem;
+  margin: 1rem 0;
+}
+#app .neg-claim-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--warn);
+}
+#app .neg-claim-text {
+  margin: 0.3rem 0 0;
+  max-width: 82ch;
+}
+#app .fixture-turn {
+  font-weight: 600;
+}
+#app .scope-note {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--inset);
+  padding: 0.7rem 1rem;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+/* ── the scripture footer ───────────────────────────────────────────────── */
+
+.scripture-footer {
+  max-width: 76rem;
+  margin: 3rem auto 0;
+  padding: 1.2rem clamp(1rem, 3vw, 2rem) 2rem;
+  border-top: 1px solid var(--border);
+}
+.scripture-footer p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-style: italic;
+}
+
+/*
+ * Reduced motion. The only transitions in this lab are button and summary hover
+ * repaints, and there are no `@keyframes` at all -- the template bans decorative
+ * motion and nothing here moves on its own. The block stays because it is a
+ * property of the stylesheet as it is today rather than a guarantee about
+ * tomorrow, and because the gate asserts the preference is really in effect.
+ */
+@media (prefers-reduced-motion: reduce) {
+  #app *,
+  #app *::before,
+  #app *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

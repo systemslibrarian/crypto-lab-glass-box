@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Interactive demo of Chow-style white-box AES-128 (SAC 2002), broken in the browser by differential computation analysis (Bos et al., CHES 2016) and by step A1 of the BGE algebraic attack (SAC 2004)."
+    />
+    <meta name="author" content="systemslibrarian" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#080c11" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#129482;</text></svg>"
+    />
+    <script>
+      // Dark is the only theme. Pin it before first paint, and overwrite any
+      // 'light' a visitor stored back when the header carried a theme toggle.
+      (function () {
+        try {
+          localStorage.setItem('theme', 'dark');
+        } catch (e) {}
+        document.documentElement.setAttribute('data-theme', 'dark');
+      })();
+    </script>
+    <title>Glass Box &mdash; crypto-lab</title>
+  </head>
+  <body>
+    <style>
+      .cl-topbar {
+        /* The bar is always dark (#0b1512) regardless of page theme, so header
+           text must always be light. Mix each lab's --accent toward near-white so
+           the hue still tints the brand but contrast stays >=4.5:1 on the bar even
+           when a lab's accent is dark (e.g. a light-theme #1a56db). */
+        --cl-ink: color-mix(in srgb, var(--accent, #35d6bb) 60%, #eafff8);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.7rem clamp(0.9rem, 3vw, 2rem);
+        background: #0b1512;
+        border-bottom: 1px solid color-mix(in srgb, var(--accent, #35d6bb) 22%, transparent);
+        font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+      }
+      .cl-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        text-decoration: none;
+      }
+      .cl-badge {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border: 1.5px solid var(--accent, #35d6bb);
+        border-radius: 10px;
+        color: var(--cl-ink);
+        font-weight: 700;
+        font-size: 0.95rem;
+        letter-spacing: 0.05em;
+      }
+      .cl-brand-text {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.15;
+      }
+      .cl-title {
+        color: #eafff8;
+        font-weight: 700;
+        font-size: 1.05rem;
+        letter-spacing: 0.12em;
+      }
+      .cl-sub {
+        color: #5e8b80;
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
+      }
+      .cl-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .cl-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.5rem 0.85rem;
+        border-radius: 10px;
+        /* WCAG 1.4.11. There is no fill, so this border is the whole control
+           boundary, and mixing the PAGE's --accent ties the ratio to each lab's
+           palette: every lab using that form fails, and for a dark accent 3:1 is
+           unreachable at any mix percentage. --cl-ink already mixes toward the
+           bar's near-white ink, so mixing it is accent-independent. */
+        border: 1px solid color-mix(in srgb, var(--cl-ink) 70%, transparent);
+        background: transparent;
+        color: var(--cl-ink);
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        text-decoration: none;
+        transition: background 0.15s, border-color 0.15s, color 0.15s;
+      }
+      .cl-btn:hover {
+        background: color-mix(in srgb, var(--accent, #35d6bb) 14%, transparent);
+        border-color: var(--accent, #35d6bb);
+        color: #eafff8;
+      }
+      .cl-btn svg {
+        width: 15px;
+        height: 15px;
+      }
+      .cl-icon {
+        padding: 0.5rem 0.6rem;
+        font-size: 0.95rem;
+      }
+      /* Skip-to-content link: first focusable element so keyboard users can bypass
+         this sticky header (WCAG 2.4.1). Hidden until focused. Fixed light-on-dark
+         pair (not --accent, which can be a dark hue on some labs) keeps contrast AA. */
+      .cl-skip-link {
+        position: absolute;
+        left: 0.5rem;
+        top: -3rem;
+        z-index: 1001;
+        padding: 0.55rem 1rem;
+        border-radius: 0 0 10px 10px;
+        background: #eafff8;
+        color: #0b1512;
+        font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: 0.8rem;
+        letter-spacing: 0.04em;
+        text-decoration: none;
+        transition: top 0.15s ease;
+      }
+      .cl-skip-link:focus {
+        top: 0;
+        outline: 2px solid var(--accent, #35d6bb);
+        outline-offset: 2px;
+      }
+      /* Dark is the only theme, so hide any in-page theme toggle a lab still
+         ships. The element stays in the DOM so the lab's theme JS keeps working. */
+      body :is(#theme-toggle, #themeToggle, .theme-toggle, .theme-toggle-btn, [data-theme-toggle]) {
+        display: none !important;
+      }
+      @media (max-width: 560px) {
+        .cl-sub {
+          display: none;
+        }
+        .cl-btn span {
+          display: none;
+        }
+        .cl-btn svg {
+          margin: 0;
+        }
+      }
+      /* cl-a11y-touch: WCAG 2.5.5 target size on touch pointers only, so the
+         bar keeps its density on desktop where a mouse is precise. */
+      @media (pointer: coarse) {
+        .cl-btn,
+        .cl-icon {
+          min-height: 44px;
+        }
+      }
+      @media (pointer: coarse) and (min-width: 380px) {
+        .cl-btn,
+        .cl-icon {
+          min-width: 44px;
+        }
+      }
+    </style>
+    <a class="cl-skip-link" href="#app">Skip to content</a>
+    <header class="cl-topbar" role="banner" aria-label="Crypto Lab">
+      <a class="cl-brand" href="https://crypto-lab.systemslibrarian.dev/" aria-label="Crypto Lab home">
+        <span class="cl-badge">CL</span>
+        <span class="cl-brand-text">
+          <span class="cl-title">CRYPTO LAB</span>
+          <span class="cl-sub">systemslibrarian.dev</span>
+        </span>
+      </a>
+      <nav class="cl-actions" aria-label="Crypto Lab navigation">
+        <a class="cl-btn" href="https://crypto-lab.systemslibrarian.dev/" aria-label="Crypto Lab menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          <span>Menu</span>
+        </a>
+        <a class="cl-btn" href="https://github.com/systemslibrarian/crypto-lab-glass-box" target="_blank" rel="noopener" aria-label="View this project on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7 0-.7 0-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C17.3 5 18.3 5.3 18.3 5.3c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </nav>
+    </header>
+    <script>
+      (function () {
+        // A page may have only one banner landmark. This shared site header is it;
+        // demote any banner a lab also declared on its own page header (explicit
+        // role="banner", or an implicit <header> child of <body>) so landmarks stay unique.
+        function dedupeBanner() {
+          var bar = document.querySelector('.cl-topbar');
+          if (!bar) return;
+          document.querySelectorAll('[role="banner"]').forEach(function (el) {
+            if (el !== bar) el.setAttribute('role', 'group');
+          });
+          Array.prototype.forEach.call(document.querySelectorAll('header'), function (el) {
+            if (el === bar || el.hasAttribute('role')) return;
+            // <header> only implies banner when it is NOT scoped inside sectioning content.
+            // Checking closest() catches heroes nested in #app, which body.children missed.
+            if (el.closest('main, article, aside, nav, section')) return;
+            el.setAttribute('role', 'group');
+          });
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', dedupeBanner);
+        else dedupeBanner();
+      })();
+    </script>
+
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
