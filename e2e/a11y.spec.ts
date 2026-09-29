@@ -1,13 +1,5 @@
 import { expect, test } from '@playwright/test';
-import {
-  boot,
-  driveAllStates,
-  expectBaselineNotStale,
-  NARROW,
-  REFLOW,
-  reportCollected,
-  watchPageErrors,
-} from './gate';
+import { boot, driveAllStates, expectBaselineNotStale, NARROW, REFLOW, reportCollected, watchPageErrors } from './gate';
 
 /**
  * WCAG A/AA regression gate.

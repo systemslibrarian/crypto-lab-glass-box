@@ -16,7 +16,4 @@
  * A run with `NT_BASELINE_CAPTURE=1` set prints every finding through this same
  * path and asserts nothing, which is how this file is regenerated.
  */
-export const NONTEXT_BASELINE: Record<
-  string,
-  { ratio: number; required: number; unverified: boolean }
-> = {};
+export const NONTEXT_BASELINE: Record<string, { ratio: number; required: number; unverified: boolean }> = {};

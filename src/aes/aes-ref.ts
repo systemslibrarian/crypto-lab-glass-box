@@ -99,8 +99,7 @@ export function invertKeySchedule(lastRoundKey: Uint8Array): Uint8Array {
   for (let i = 0; i < 4; i++) {
     const o = 4 * i;
     w[40 + i] =
-      ((lastRoundKey[o] << 24) | (lastRoundKey[o + 1] << 16) | (lastRoundKey[o + 2] << 8) | lastRoundKey[o + 3]) >>>
-      0;
+      ((lastRoundKey[o] << 24) | (lastRoundKey[o + 1] << 16) | (lastRoundKey[o + 2] << 8) | lastRoundKey[o + 3]) >>> 0;
   }
   for (let i = 43; i >= 4; i--) {
     let temp = w[i - 1];

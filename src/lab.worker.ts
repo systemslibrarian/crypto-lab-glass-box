@@ -259,7 +259,12 @@ function windowFor(surface: AttackSurface): TraceWindow {
   return surface === 'input' ? 'first-round' : 'last-rounds';
 }
 
-function requestFor(surface: AttackSurface, set: TraceSet, targets: readonly DcaTarget[], bits: readonly number[]): DcaRequest {
+function requestFor(
+  surface: AttackSurface,
+  set: TraceSet,
+  targets: readonly DcaTarget[],
+  bits: readonly number[],
+): DcaRequest {
   const w = set.map.windows[windowFor(surface)];
   return {
     bits: set.bits,
@@ -330,8 +335,7 @@ function handleDca(
     curves = { byteIndex: curveByte, target, bit, values: computed.curves, max: computed.max };
   }
 
-  const hypothesisValid =
-    surface === 'input' ? !inputIsRemote(current.placement) : !outputIsRemote(current.placement);
+  const hypothesisValid = surface === 'input' ? !inputIsRemote(current.placement) : !outputIsRemote(current.placement);
 
   const report: DcaReport = {
     kind: 'dca',
@@ -395,8 +399,7 @@ function handleHeatmap(
   const rows = Math.min(order.length, maxRows);
   // Even subsampling preserves the two blocks when the rows were split.
   const pick = (r: number): number => order[Math.floor((r * order.length) / rows)];
-  const scaledSplit =
-    splitRow === null ? null : Math.round((splitRow * rows) / order.length);
+  const scaledSplit = splitRow === null ? null : Math.round((splitRow * rows) / order.length);
 
   const cols = w.bits;
   const full = new Uint8Array(rows * cols);

@@ -82,9 +82,7 @@ describe('randomPermutation', () => {
     for (let trial = 0; trial < 200; trial++) {
       const p = randomPermutation(16, rng);
       expect(new Set(p).size).toBe(16);
-      expect(invertPermutation(p)).toEqual(
-        Uint8Array.from({ length: 16 }, (_, i) => p.indexOf(i)),
-      );
+      expect(invertPermutation(p)).toEqual(Uint8Array.from({ length: 16 }, (_, i) => p.indexOf(i)));
     }
   });
 

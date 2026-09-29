@@ -76,7 +76,12 @@ export interface DcaRunRequest {
 export interface HeatmapRequest {
   readonly kind: 'heatmap';
   /** Sort the trace rows by the bit this hypothesis predicts, or null to leave them in order. */
-  readonly sortBy: { readonly byteIndex: number; readonly guess: number; readonly target: DcaTarget; readonly bit: number } | null;
+  readonly sortBy: {
+    readonly byteIndex: number;
+    readonly guess: number;
+    readonly target: DcaTarget;
+    readonly bit: number;
+  } | null;
   readonly window: TraceWindow;
   /** Absolute sample index to centre the zoomed strip on. */
   readonly focusSample: number | null;

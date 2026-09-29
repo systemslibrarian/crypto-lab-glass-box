@@ -55,10 +55,7 @@ export function outputIsRemote(placement: EncodingPlacement): boolean {
   return placement === 'remote-both' || placement === 'remote-output';
 }
 
-export function createRemoteParty(
-  placement: EncodingPlacement,
-  handover: ExternalEncodingHandover,
-): RemoteParty {
+export function createRemoteParty(placement: EncodingPlacement, handover: ExternalEncodingHandover): RemoteParty {
   const holdsInput = inputIsRemote(placement);
   const holdsOutput = outputIsRemote(placement);
   if ((holdsInput || holdsOutput) && !handover.present) {

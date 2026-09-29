@@ -115,13 +115,7 @@ export function xorTable(left: Nibble, right: Nibble, out: Nibble, into: Uint8Ar
  * the caller's inventory count is derived from the build rather than asserted
  * alongside it.
  */
-export function xorWireTables(
-  left: Wire,
-  right: Wire,
-  out: Wire,
-  into: Uint8Array,
-  offset: number,
-): number {
+export function xorWireTables(left: Wire, right: Wire, out: Wire, into: Uint8Array, offset: number): number {
   if (left.length !== right.length || left.length !== out.length) {
     throw new Error('an XOR tree step needs three wires of the same width');
   }

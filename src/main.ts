@@ -55,7 +55,9 @@ import { drawCurves, drawFocusHeatmap, drawPeaksPerGuess, drawTraceHeatmap } fro
 
 // ── the worker client ───────────────────────────────────────────────────────
 
-const worker = new Worker(new URL('./lab.worker.ts', import.meta.url), { type: 'module' });
+const worker = new Worker(new URL('./lab.worker.ts', import.meta.url), {
+  type: 'module',
+});
 let nextId = 1;
 
 interface Pending {
@@ -89,7 +91,11 @@ function ask<T extends { kind: string }>(
 ): Promise<T> {
   const id = nextId++;
   return new Promise<T>((resolve, reject) => {
-    pending.set(id, { resolve: resolve as unknown as Pending['resolve'], reject, onProgress });
+    pending.set(id, {
+      resolve: resolve as unknown as Pending['resolve'],
+      reject,
+      onProgress,
+    });
     worker.postMessage({ ...request, id });
   });
 }
@@ -121,6 +127,16 @@ interface LabState {
   inspectGuess: 'recovered' | 'wrong';
   /** What a rebuild invalidated, so the page can say so rather than just blank. */
   retired: { traces: number; attacked: boolean; reason: string } | null;
+  /**
+   * How many times each act has completed this session.
+   *
+   * Printed in each status line, and not only for tidiness: several of this
+   * page's verdicts read the same after a re-run as before it -- "IT IS AES-128"
+   * does not change when you rebuild with a different seed -- so without a
+   * counter neither a reader nor a test can tell a finished re-run from a click
+   * that did nothing. The claims suite waits on these.
+   */
+  runs: { build: number; trace: number; dca: number; bge: number };
   /** One row per (placement, surface) the reader has actually run. */
   log: {
     placement: EncodingPlacement;
@@ -155,6 +171,7 @@ const state: LabState = {
   inspectByte: 0,
   inspectGuess: 'recovered',
   retired: null,
+  runs: { build: 0, trace: 0, dca: 0, bge: 0 },
   log: [],
   bge: null,
 };
@@ -204,11 +221,7 @@ function hero(): HTMLElement {
 }
 
 app.append(hero(), main);
-main.append(
-  el('div', { id: 'boot', class: 'panel' }, [
-    el('p', {}, ['Loading the lab…']),
-  ]),
-);
+main.append(el('div', { id: 'boot', class: 'panel' }, [el('p', {}, ['Loading the lab…'])]));
 
 export {};
 // ── Scope: what is real, what is not, and what this does not prove ──────────
@@ -278,11 +291,15 @@ function scopeSection(): HTMLElement {
               ]),
               ...BGE_FAILURE_CODES.map((code): Cell[] => [
                 { text: code, cls: 'mono' },
-                { text: 'the algebraic attack, refusing a round, a column or a table set it cannot work on' },
+                {
+                  text: 'the algebraic attack, refusing a round, a column or a table set it cannot work on',
+                },
               ]),
               [
                 { text: '(none)', cls: 'mono' },
-                { text: 'the white-box program itself, in every state, including while it is being broken' },
+                {
+                  text: 'the white-box program itself, in every state, including while it is being broken',
+                },
               ],
             ],
           ),
@@ -356,7 +373,12 @@ const keyInput = el('input', {
   autocomplete: 'off',
   'aria-describedby': 'key-hex-hint',
 });
-const keyError = el('p', { id: 'key-error', class: 'error', role: 'status', 'aria-live': 'polite' });
+const keyError = el('p', {
+  id: 'key-error',
+  class: 'error',
+  role: 'status',
+  'aria-live': 'polite',
+});
 const seedInput = el('input', {
   type: 'text',
   id: 'seed',
@@ -411,24 +433,33 @@ async function runBuild(): Promise<void> {
     const hadTraces = state.trace?.traces ?? 0;
     const hadAttack = state.dca !== null;
     const report = await ask<BuildReport & { id: number }>(
-      { kind: 'build', keyHex: keyInput.value, placement: state.placement, seed: state.seed },
+      {
+        kind: 'build',
+        keyHex: keyInput.value,
+        placement: state.placement,
+        seed: state.seed,
+      },
       (phase, done, total) => {
         buildStatus.textContent = total > 1 ? `${phase} (${done} of ${total})` : `${phase}…`;
       },
     );
     state.build = report;
-    state.retired =
-      hadTraces > 0 || hadAttack
-        ? {
-            traces: hadTraces,
-            attacked: hadAttack,
-            reason: 'the program was rebuilt, so a different table network is in memory now',
-          }
-        : null;
+    // Only overwrite the note when this build actually retired something. A
+    // second build in a row retires nothing, and blanking the note there would
+    // make the first one's verdict disappear silently after all -- which is the
+    // exact failure mode saying "retired" exists to prevent.
+    if (hadTraces > 0 || hadAttack) {
+      state.retired = {
+        traces: hadTraces,
+        attacked: hadAttack,
+        reason: 'the program was rebuilt, so a different table network is in memory now',
+      };
+    }
     state.trace = null;
     state.dca = null;
     state.bge = null;
-    buildStatus.textContent = `Built in ${report.buildMs} ms.`;
+    state.runs.build += 1;
+    buildStatus.textContent = `Program #${state.runs.build} built in ${report.buildMs} ms.`;
     renderBuild(report);
     renderTrace(null);
     renderDca(null);
@@ -458,7 +489,9 @@ function renderBuild(report: BuildReport | null): void {
   const ok = v.fipsVectorMatches && v.randomBlocksMatching === v.randomBlocks;
   buildOut.append(
     el('div', { class: 'verdict-row', id: 'build-verdict' }, [
-      verdict(ok ? 'ok' : 'alarm', ok ? 'IT IS AES-128' : 'IT IS NOT AES-128', { 'data-check': ok ? 'pass' : 'fail' }),
+      verdict(ok ? 'ok' : 'alarm', ok ? 'IT IS AES-128' : 'IT IS NOT AES-128', {
+        'data-check': ok ? 'pass' : 'fail',
+      }),
       el('span', { class: 'verdict-detail' }, [
         ok
           ? `The table network agrees with ${
@@ -597,7 +630,12 @@ const traceNumber = el('input', {
   value: String(state.traces),
   'aria-describedby': 'traces-hint',
 });
-const traceError = el('p', { id: 'trace-error', class: 'error', role: 'status', 'aria-live': 'polite' });
+const traceError = el('p', {
+  id: 'trace-error',
+  class: 'error',
+  role: 'status',
+  'aria-live': 'polite',
+});
 
 function syncTraceInputs(from: 'range' | 'number'): void {
   const raw = Number(from === 'range' ? traceRange.value : traceNumber.value);
@@ -621,12 +659,19 @@ async function runTrace(): Promise<void> {
   setBusy(true);
   traceStatus.textContent = 'Tracing…';
   try {
-    const report = await ask<TraceReport & { id: number }>({ kind: 'trace', traces: state.traces }, (phase, done, total) => {
-      traceStatus.textContent = `${phase}: ${count(done)} of ${count(total)}`;
-    });
+    const report = await ask<TraceReport & { id: number }>(
+      { kind: 'trace', traces: state.traces },
+      (phase, done, total) => {
+        traceStatus.textContent = `${phase}: ${count(done)} of ${count(total)}`;
+      },
+    );
     state.trace = report;
     state.dca = null;
-    traceStatus.textContent = `Recorded ${count(report.traces)} traces in ${report.elapsedMs} ms.`;
+    // The note has been made good on: these traces describe the program that is
+    // in memory now.
+    state.retired = null;
+    state.runs.trace += 1;
+    traceStatus.textContent = `Run #${state.runs.trace}: recorded ${count(report.traces)} traces in ${report.elapsedMs} ms.`;
     renderTrace(report);
     renderDca(null);
     await refreshHeatmap();
@@ -647,7 +692,21 @@ async function runTrace(): Promise<void> {
 function renderTrace(report: TraceReport | null): void {
   clear(traceOut);
   if (!report) {
-    traceOut.append(el('p', { class: 'placeholder' }, ['No traces recorded. Press "Trace it".']));
+    // A blank panel looks like a page that has never been used. Saying WHAT was
+    // retired, and why, is the difference between an empty state and a stale
+    // verdict quietly disappearing.
+    if (state.retired && state.retired.traces > 0) {
+      traceOut.append(
+        el('div', { class: 'verdict-row', id: 'trace-retired', 'data-retired': 'trace' }, [
+          verdict('warn', 'RETIRED'),
+          el('span', { class: 'verdict-detail' }, [
+            `The ${count(state.retired.traces)} traces that were here described a different program: ${state.retired.reason}. Record new ones.`,
+          ]),
+        ]),
+      );
+    } else {
+      traceOut.append(el('p', { class: 'placeholder' }, ['No traces recorded. Press "Trace it".']));
+    }
     traceFigure.describe('No traces recorded yet.');
     return;
   }
@@ -730,20 +789,33 @@ function traceSection(): HTMLElement {
 // ── Act 4: differential computation analysis ───────────────────────────────
 
 const dcaStatus = status('dca-status');
-const dcaError = el('p', { id: 'dca-error', class: 'error', role: 'status', 'aria-live': 'polite' });
+const dcaError = el('p', {
+  id: 'dca-error',
+  class: 'error',
+  role: 'status',
+  'aria-live': 'polite',
+});
 const dcaOut = el('div', { id: 'dca-out' });
 const dcaInspect = el('div', { id: 'dca-inspect' });
 const peaksFigure = figure('peaks-plot', 'Peak per guess, scrollable', 'No attack has run yet.');
 const focusFigure = figure('focus-heatmap', null, 'No attack has run yet.');
 const curvesFigure = figure('curves-plot', 'Difference-of-means curves, scrollable', 'No attack has run yet.');
-const byteStrip = el('div', { id: 'byte-strip', class: 'byte-strip', role: 'list', 'aria-label': 'Recovered key bytes' });
+const byteStrip = el('div', {
+  id: 'byte-strip',
+  class: 'byte-strip',
+  role: 'list',
+  'aria-label': 'Recovered key bytes',
+});
 
 const targetChecks = el('div', { class: 'check-row', id: 'target-checks' });
 const bitSelect = select(
   'bit-select',
   [
     { value: 'all', label: 'all eight bits' },
-    ...[0, 1, 2, 3, 4, 5, 6, 7].map((b) => ({ value: String(b), label: `bit ${b} only` })),
+    ...[0, 1, 2, 3, 4, 5, 6, 7].map((b) => ({
+      value: String(b),
+      label: `bit ${b} only`,
+    })),
   ],
   'all',
   (value) => {
@@ -829,7 +901,9 @@ async function refreshHeatmap(): Promise<void> {
     drawTraceHeatmap(
       traceFigure.canvas,
       whole,
-      (state.build?.segments ?? []).filter((s) => s.id.startsWith('round:')).map((s) => ({ label: s.label, startBit: s.startBit })),
+      (state.build?.segments ?? [])
+        .filter((s) => s.id.startsWith('round:'))
+        .map((s) => ({ label: s.label, startBit: s.startBit })),
     ),
   );
 
@@ -848,7 +922,9 @@ async function refreshHeatmap(): Promise<void> {
       : null;
   const focusSample = dca ? dca.bytes[state.inspectByte].peakSample : null;
   if (focusSample === null) {
-    focusFigure.describe('No sample is in focus yet: run the attack, and this strip will centre on the sample it peaked at.');
+    focusFigure.describe(
+      'No sample is in focus yet: run the attack, and this strip will centre on the sample it peaked at.',
+    );
     return;
   }
   const strip = await ask<HeatmapReport & { id: number }>({
@@ -905,9 +981,10 @@ async function runDcaAttack(): Promise<void> {
     for (let i = 1; i < 16; i++) if (report.bytes[i].margin > report.bytes[best].margin) best = i;
     state.inspectByte = best;
     byteSelect.value = String(best);
-    dcaStatus.textContent = `Scored ${count(256 * 16 * targets.length * bitsSelected().length)} hypothesis evaluations in ${
-      report.elapsedMs
-    } ms.`;
+    state.runs.dca += 1;
+    dcaStatus.textContent = `Attack #${state.runs.dca}: scored ${count(
+      256 * 16 * targets.length * bitsSelected().length,
+    )} hypothesis evaluations in ${report.elapsedMs} ms.`;
     recordLogRow(report);
     renderDca(report);
     await refreshInspector();
@@ -927,9 +1004,20 @@ async function runDcaAttack(): Promise<void> {
 
 function headlineFor(report: DcaReport): { tone: VerdictTone; text: string } {
   const what = report.recovers === 'key' ? 'KEY' : 'LAST ROUND KEY';
-  if (report.complete) return { tone: 'alarm', text: `${what} RECOVERED — ${report.correctCount} OF 16 BYTES` };
-  if (report.correctCount >= 4) return { tone: 'warn', text: `${what} PARTLY RECOVERED — ${report.correctCount} OF 16 BYTES` };
-  return { tone: 'ok', text: `NO RECOVERY — ${report.correctCount} OF 16 BYTES` };
+  if (report.complete)
+    return {
+      tone: 'alarm',
+      text: `${what} RECOVERED — ${report.correctCount} OF 16 BYTES`,
+    };
+  if (report.correctCount >= 4)
+    return {
+      tone: 'warn',
+      text: `${what} PARTLY RECOVERED — ${report.correctCount} OF 16 BYTES`,
+    };
+  return {
+    tone: 'ok',
+    text: `NO RECOVERY — ${report.correctCount} OF 16 BYTES`,
+  };
 }
 
 function renderDca(report: DcaReport | null): void {
@@ -937,7 +1025,18 @@ function renderDca(report: DcaReport | null): void {
   clear(byteStrip);
   clear(dcaInspect);
   if (!report) {
-    dcaOut.append(el('p', { class: 'placeholder' }, ['No attack has run. Press "Run the attack".']));
+    if (state.retired?.attacked) {
+      dcaOut.append(
+        el('div', { class: 'verdict-row', id: 'dca-retired', 'data-retired': 'dca' }, [
+          verdict('warn', 'RETIRED'),
+          el('span', { class: 'verdict-detail' }, [
+            `The recovery that was here was of a different key, from a different program: ${state.retired.reason}. Trace again and re-run the attack.`,
+          ]),
+        ]),
+      );
+    } else {
+      dcaOut.append(el('p', { class: 'placeholder' }, ['No attack has run. Press "Run the attack".']));
+    }
     byteStrip.append(el('span', { class: 'placeholder', role: 'listitem' }, ['—']));
     peaksFigure.describe('No attack has run yet.');
     curvesFigure.describe('No attack has run yet.');
@@ -948,18 +1047,30 @@ function renderDca(report: DcaReport | null): void {
   const confidentWrong = confident.filter((b) => !b.correct);
 
   dcaOut.append(
-    el('div', { class: 'verdict-row', id: 'dca-verdict' }, [
-      verdict(head.tone, head.text, { 'data-dca-verdict': report.complete ? 'complete' : String(report.correctCount) }),
-      el('span', { class: 'verdict-detail' }, [
-        `${count(report.traces)} traces, ${count(report.sampleCount)} samples (${report.windowLabel}), ` +
-          `${report.targets.map((t) => TARGET_LABELS[t]).join(' and ')}, ` +
-          `${report.bits.length === 8 ? 'all eight prediction bits' : `bit ${report.bits[0]}`}.`,
-      ]),
-    ]),
+    el(
+      'div',
+      {
+        class: 'verdict-row',
+        id: 'dca-verdict',
+        'data-dca-recovered': String(report.correctCount),
+        'data-dca-complete': report.complete ? 'yes' : 'no',
+      },
+      [
+        verdict(head.tone, head.text),
+        el('span', { class: 'verdict-detail' }, [
+          `${count(report.traces)} traces, ${count(report.sampleCount)} samples (${report.windowLabel}), ` +
+            `${report.targets.map((t) => TARGET_LABELS[t]).join(' and ')}, ` +
+            `${report.bits.length === 8 ? 'all eight prediction bits' : `bit ${report.bits[0]}`}.`,
+        ]),
+      ],
+    ),
     definitionList([
       ['What the attack committed to', el('span', { class: 'mono' }, [group4(report.recoveredHex)])],
       ['The truth, consulted only afterwards', el('span', { class: 'mono' }, [group4(report.truthHex)])],
-      ['Bytes correct', `${report.correctCount} of 16 (a blind guesser would expect ${report.chanceCorrect.toFixed(2)})`],
+      [
+        'Bytes correct',
+        `${report.correctCount} of 16 (a blind guesser would expect ${report.chanceCorrect.toFixed(2)})`,
+      ],
       [
         'Bytes the attack was confident about',
         `${confident.length} at a margin of ${CONFIDENCE_MARGIN} or better, of which ${confidentWrong.length} ${
@@ -968,10 +1079,7 @@ function renderDca(report: DcaReport | null): void {
       ],
       ...(report.derivedKeyHex !== null
         ? ([
-            [
-              'The key the inverse schedule gives',
-              el('span', { class: 'mono' }, [group4(report.derivedKeyHex)]),
-            ],
+            ['The key the inverse schedule gives', el('span', { class: 'mono' }, [group4(report.derivedKeyHex)])],
             [
               'and how much of it is right',
               `${report.derivedKeyCorrectCount} of 16 — inverting the AES-128 schedule needs ALL sixteen bytes of k¹⁰, so one wrong byte corrupts everything downstream of it`,
@@ -992,13 +1100,21 @@ function renderDca(report: DcaReport | null): void {
   for (const b of report.bytes) {
     const tone: VerdictTone = b.correct ? 'alarm' : b.margin >= CONFIDENCE_MARGIN ? 'warn' : 'ok';
     byteStrip.append(
-      el('div', { class: `byte-cell tone-${tone}`, role: 'listitem', 'data-byte': String(b.index) }, [
-        el('span', { class: 'byte-index' }, [`k${b.index}`]),
-        el('span', { class: 'byte-value mono' }, [byteHex(b.guess)]),
-        el('span', { class: 'byte-glyph', 'aria-hidden': 'true' }, [b.correct ? '✓' : '✕']),
-        el('span', { class: 'byte-state' }, [b.correct ? 'found' : 'missed']),
-        el('span', { class: 'byte-margin mono' }, [`${Math.round(b.margin * 100)}%`]),
-      ]),
+      el(
+        'div',
+        {
+          class: `byte-cell tone-${tone}`,
+          role: 'listitem',
+          'data-byte': String(b.index),
+        },
+        [
+          el('span', { class: 'byte-index' }, [`k${b.index}`]),
+          el('span', { class: 'byte-value mono' }, [byteHex(b.guess)]),
+          el('span', { class: 'byte-glyph', 'aria-hidden': 'true' }, [b.correct ? '✓' : '✕']),
+          el('span', { class: 'byte-state' }, [b.correct ? 'found' : 'missed']),
+          el('span', { class: 'byte-margin mono' }, [`${Math.round(b.margin * 100)}%`]),
+        ],
+      ),
     );
   }
 
@@ -1036,12 +1152,17 @@ function renderDca(report: DcaReport | null): void {
               { text: `k${b.index}` },
               { text: `0x${byteHex(b.guess)}`, cls: 'mono' },
               { text: b.peak.toFixed(4), cls: 'mono' },
-              { text: `0x${byteHex(b.runnerUpGuess)} at ${b.runnerUp.toFixed(4)}`, cls: 'mono' },
+              {
+                text: `0x${byteHex(b.runnerUpGuess)} at ${b.runnerUp.toFixed(4)}`,
+                cls: 'mono',
+              },
               { text: `${Math.round(b.margin * 100)}%`, cls: 'mono' },
               { text: count(b.peakSample), cls: 'mono' },
               { text: b.peakTarget, cls: 'mono' },
               { text: b.peakBit >= 0 ? String(b.peakBit) : '—', cls: 'mono' },
-              { node: verdict(b.correct ? 'alarm' : 'ok', b.correct ? 'yes' : 'no') },
+              {
+                node: verdict(b.correct ? 'alarm' : 'ok', b.correct ? 'yes' : 'no'),
+              },
             ]),
           ),
         ),
@@ -1063,8 +1184,16 @@ function dcaSection(): HTMLElement {
       'surface',
       'Which side to attack',
       [
-        { value: 'input', label: 'The input side, round 1', note: 'Predicts from the value fed to the program.' },
-        { value: 'output', label: 'The output side, rounds 9 and 10', note: 'Predicts from the value the program returns.' },
+        {
+          value: 'input',
+          label: 'The input side, round 1',
+          note: 'Predicts from the value fed to the program.',
+        },
+        {
+          value: 'output',
+          label: 'The output side, rounds 9 and 10',
+          note: 'Predicts from the value the program returns.',
+        },
       ],
       state.surface,
       (value) => {
@@ -1148,22 +1277,34 @@ function renderLog(): void {
       'Measured results by encoding placement',
       table(
         'Every placement and side you have actually run',
-        ['Where the encodings live', 'Side attacked', 'Traces', 'Bytes recovered', 'Confident', 'Tables', 'Program', 'Trace bits'],
+        [
+          'Where the encodings live',
+          'Side attacked',
+          'Traces',
+          'Bytes recovered',
+          'Confident',
+          'Tables',
+          'Program',
+          'Trace bits',
+        ],
         state.log.map((r): Cell[] => [
           { text: PLACEMENT_LABELS[r.placement] },
-          { text: r.surface === 'input' ? 'input, round 1' : 'output, rounds 9–10' },
+          {
+            text: r.surface === 'input' ? 'input, round 1' : 'output, rounds 9–10',
+          },
           { text: count(r.traces), cls: 'mono' },
           {
             node: el('span', { class: 'cell-stack' }, [
-              verdict(
-                r.complete ? 'alarm' : r.correctCount >= 4 ? 'warn' : 'ok',
-                `${r.correctCount} of 16`,
-                { 'data-log-recovered': String(r.correctCount) },
-              ),
+              verdict(r.complete ? 'alarm' : r.correctCount >= 4 ? 'warn' : 'ok', `${r.correctCount} of 16`, {
+                'data-log-recovered': String(r.correctCount),
+              }),
               el('span', { class: 'cell-sub' }, [r.recovers === 'key' ? 'of the key' : 'of the last round key']),
             ]),
           },
-          { text: `${r.confident}${r.confidentWrong > 0 ? ` (${r.confidentWrong} wrong)` : ''}`, cls: 'mono' },
+          {
+            text: `${r.confident}${r.confidentWrong > 0 ? ` (${r.confidentWrong} wrong)` : ''}`,
+            cls: 'mono',
+          },
           { text: count(r.tables), cls: 'mono' },
           { text: bytesHuman(r.bytes), cls: 'mono' },
           { text: count(r.traceBits), cls: 'mono' },
@@ -1176,20 +1317,22 @@ function renderLog(): void {
   if (plain && compiled) {
     const same = plain.correctCount === compiled.correctCount;
     logHost.append(
-      el('div', { class: 'verdict-row', id: 'compiled-in-comparison' }, [
-        verdict(same ? 'alarm' : 'warn', same ? 'THE ENCODING CHANGED NOTHING' : 'THE TWO RUNS DIFFER', {
-          'data-comparison': same ? 'identical' : 'different',
-        }),
-        el('span', { class: 'verdict-detail' }, [
-          `Compiling the external encodings in grew the program from ${count(plain.tables)} tables (${bytesHuman(
-            plain.bytes,
-          )}) to ${count(compiled.tables)} tables (${bytesHuman(compiled.bytes)}) and a trace from ${count(
-            plain.traceBits,
-          )} bits to ${count(compiled.traceBits)}. The attack recovered ${plain.correctCount} bytes before and ${
-            compiled.correctCount
-          } after.`,
-        ]),
-      ]),
+      el(
+        'div',
+        { class: 'verdict-row', id: 'compiled-in-comparison', 'data-comparison': same ? 'identical' : 'different' },
+        [
+          verdict(same ? 'alarm' : 'warn', same ? 'THE ENCODING CHANGED NOTHING' : 'THE TWO RUNS DIFFER'),
+          el('span', { class: 'verdict-detail' }, [
+            `Compiling the external encodings in grew the program from ${count(plain.tables)} tables (${bytesHuman(
+              plain.bytes,
+            )}) to ${count(compiled.tables)} tables (${bytesHuman(compiled.bytes)}) and a trace from ${count(
+              plain.traceBits,
+            )} bits to ${count(compiled.traceBits)}. The attack recovered ${plain.correctCount} bytes before and ${
+              compiled.correctCount
+            } after.`,
+          ]),
+        ],
+      ),
     );
   }
 }
@@ -1223,7 +1366,10 @@ async function runSweep(): Promise<void> {
           seed: sweepSeed,
         });
         built = placement;
-        state.trace = await ask<TraceReport & { id: number }>({ kind: 'trace', traces: state.traces });
+        state.trace = await ask<TraceReport & { id: number }>({
+          kind: 'trace',
+          traces: state.traces,
+        });
       }
       const targets: DcaTarget[] = surface === 'input' ? ['sbox-output', 'inverse'] : ['last-round'];
       const report = await ask<DcaReport & { id: number }>({
@@ -1249,7 +1395,10 @@ async function runSweep(): Promise<void> {
       placement: 'remote-both',
       seed: sweepSeed,
     });
-    state.trace = await ask<TraceReport & { id: number }>({ kind: 'trace', traces: state.traces });
+    state.trace = await ask<TraceReport & { id: number }>({
+      kind: 'trace',
+      traces: state.traces,
+    });
     state.dca = await ask<DcaReport & { id: number }>({
       kind: 'dca',
       surface: 'input',
@@ -1304,7 +1453,11 @@ async function renderFixture(): Promise<void> {
   let bge: BgeReport | null = state.bge;
   if (!bge) {
     try {
-      bge = await ask<BgeReport & { id: number }>({ kind: 'bge', round: state.bgeRound, column: state.bgeColumn });
+      bge = await ask<BgeReport & { id: number }>({
+        kind: 'bge',
+        round: state.bgeRound,
+        column: state.bgeColumn,
+      });
       state.bge = bge;
       renderBge(bge);
     } catch {
@@ -1315,7 +1468,9 @@ async function renderFixture(): Promise<void> {
   const checks: { label: string; pass: boolean; detail: string }[] = [
     {
       label: 'The program is a correct AES-128',
-      pass: build.verification.fipsVectorMatches && build.verification.randomBlocksMatching === build.verification.randomBlocks,
+      pass:
+        build.verification.fipsVectorMatches &&
+        build.verification.randomBlocksMatching === build.verification.randomBlocks,
       detail: `${build.verification.randomBlocksMatching} of ${build.verification.randomBlocks} random blocks agree with ${
         build.verification.webCryptoAvailable ? 'WebCrypto' : 'the reference'
       }, and the FIPS 197 vector reproduces.`,
@@ -1330,7 +1485,8 @@ async function renderFixture(): Promise<void> {
     {
       label: 'The attacker has no hypothesis to form on this side',
       pass: !dca.hypothesisValid,
-      detail: 'The value fed to the program is F(P) for an F the program does not contain, so no candidate key byte predicts anything about the trace.',
+      detail:
+        'The value fed to the program is F(P) for an F the program does not contain, so no candidate key byte predicts anything about the trace.',
     },
     {
       label: 'The program raised no failure code',
@@ -1348,10 +1504,16 @@ async function renderFixture(): Promise<void> {
     ]),
     el(
       'ul',
-      { class: 'plain-list check-list', role: 'list', 'aria-label': 'Every check this page performs in this state' },
+      {
+        class: 'plain-list check-list',
+        role: 'list',
+        'aria-label': 'Every check this page performs in this state',
+      },
       checks.map((c) =>
         el('li', { role: 'listitem', 'data-check': c.pass ? 'pass' : 'fail' }, [
-          verdict(c.pass ? 'ok' : 'alarm', c.pass ? 'HELD' : 'FAILED', { 'data-verdict': 'check' }),
+          verdict(c.pass ? 'ok' : 'alarm', c.pass ? 'HELD' : 'FAILED', {
+            'data-verdict': 'check',
+          }),
           el('span', { class: 'check-label' }, [c.label]),
           el('span', { class: 'check-detail' }, [c.detail]),
         ]),
@@ -1442,10 +1604,18 @@ function placementSection(): HTMLElement {
 
 const bgeOut = el('div', { id: 'bge-out' });
 const bgeStatus = status('bge-status');
-const bgeError = el('p', { id: 'bge-error', class: 'error', role: 'status', 'aria-live': 'polite' });
+const bgeError = el('p', {
+  id: 'bge-error',
+  class: 'error',
+  role: 'status',
+  'aria-live': 'polite',
+});
 const roundSelect = select(
   'bge-round',
-  [...Array(9).keys()].map((i) => ({ value: String(i + 1), label: `round ${i + 1}` })),
+  [...Array(9).keys()].map((i) => ({
+    value: String(i + 1),
+    label: `round ${i + 1}`,
+  })),
   '1',
   (value) => {
     state.bgeRound = Number(value);
@@ -1475,7 +1645,8 @@ async function runBge(): Promise<void> {
       column: state.bgeColumn,
     });
     state.bge = report;
-    bgeStatus.textContent = `Step A1 finished in ${report.elapsedMs} ms.`;
+    state.runs.bge += 1;
+    bgeStatus.textContent = `Step A1 #${state.runs.bge} finished in ${report.elapsedMs} ms.`;
     renderBge(report);
   } catch (error) {
     const err = error as Error & { code?: string };
@@ -1495,30 +1666,47 @@ function renderBge(report: BgeReport | null): void {
     return;
   }
   bgeOut.append(
-    el('div', { class: 'verdict-row', id: 'bge-verdict' }, [
-      verdict(report.stripped ? 'alarm' : 'warn', report.stripped ? 'ENCODINGS STRIPPED TO AFFINE' : 'STEP A1 DID NOT COMPLETE', {
-        'data-bge-verdict': report.stripped ? 'stripped' : 'incomplete',
-      }),
-      el('span', { class: 'verdict-detail' }, [
-        `Round ${report.round}, column ${report.column}. ${count(report.evaluations)} column evaluations, ${
-          report.elapsedMs
-        } ms, and not one traced encryption.`,
-      ]),
-    ]),
+    el(
+      'div',
+      { class: 'verdict-row', id: 'bge-verdict', 'data-bge-verdict': report.stripped ? 'stripped' : 'incomplete' },
+      [
+        verdict(
+          report.stripped ? 'alarm' : 'warn',
+          report.stripped ? 'ENCODINGS STRIPPED TO AFFINE' : 'STEP A1 DID NOT COMPLETE',
+        ),
+        el('span', { class: 'verdict-detail' }, [
+          `Round ${report.round}, column ${report.column}. ${count(report.evaluations)} column evaluations, ${
+            report.elapsedMs
+          } ms, and not one traced encryption.`,
+        ]),
+      ],
+    ),
     scroller(
       'BGE step A1 results per output byte',
       table(
         'What the tables gave up, output byte by output byte',
-        ['Output byte', 'Group order', 'Every element an involution', 'GF(2) basis', 'Difference spread before', 'after'],
+        [
+          'Output byte',
+          'Group order',
+          'Every element an involution',
+          'GF(2) basis',
+          'Difference spread before',
+          'after',
+        ],
         report.bytes.map((b): Cell[] => [
           { text: `row ${b.row}` },
           { text: `${b.groupOrder}`, cls: 'mono' },
-          { node: verdict(b.everyElementIsAnInvolution ? 'ok' : 'alarm', b.everyElementIsAnInvolution ? 'yes' : 'no') },
+          {
+            node: verdict(b.everyElementIsAnInvolution ? 'ok' : 'alarm', b.everyElementIsAnInvolution ? 'yes' : 'no'),
+          },
           { text: `${b.basisSize} generators`, cls: 'mono' },
           { text: `${b.spreadBefore} values`, cls: 'mono' },
           {
             node: el('span', { class: 'cell-stack' }, [
-              verdict(b.spreadAfter === 1 ? 'alarm' : 'warn', `${b.spreadAfter} value${b.spreadAfter === 1 ? '' : 's'}`),
+              verdict(
+                b.spreadAfter === 1 ? 'alarm' : 'warn',
+                `${b.spreadAfter} value${b.spreadAfter === 1 ? '' : 's'}`,
+              ),
               el('span', { class: 'cell-sub' }, [b.spreadAfter === 1 ? 'constant in x' : 'still varies']),
             ]),
           },

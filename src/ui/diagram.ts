@@ -46,7 +46,8 @@ function arrow(x1: number, y1: number, x2: number, y2: number, encoded: boolean,
   const g = svg('g', { class: `dg-wire ${encoded ? 'dg-encoded' : 'dg-clear'}` });
   g.append(svg('line', { x1, y1, x2, y2, class: 'dg-line-wire' }));
   g.append(svg('polygon', { points: `${x2},${y2} ${x2 - 8},${y2 - 5} ${x2 - 8},${y2 + 5}`, class: 'dg-head' }));
-  if (label) g.append(svg('text', { x: (x1 + x2) / 2, y: y1 - 8, class: 'dg-wire-label', 'text-anchor': 'middle' }, [label]));
+  if (label)
+    g.append(svg('text', { x: (x1 + x2) / 2, y: y1 - 8, class: 'dg-wire-label', 'text-anchor': 'middle' }, [label]));
   return g;
 }
 
@@ -165,14 +166,24 @@ export function createDiagram(): DiagramView {
     root.append(arrow(t2Right, 128, t2Right + 24, 128, true, '32 bits'));
     x = t2Right + 24;
     root.append(
-      boxNode({ x, y: 90, w: 128, h: 76 }, 'Type IV × 24', ['nibble XORs summing', 'the four 32-bit', 'words to MB·MixColumns.'], 'dg-core'),
+      boxNode(
+        { x, y: 90, w: 128, h: 76 },
+        'Type IV × 24',
+        ['nibble XORs summing', 'the four 32-bit', 'words to MB·MixColumns.'],
+        'dg-core',
+      ),
     );
     root.append(tap(x + 64, 172));
     x += 128;
     root.append(arrow(x, 128, x + 24, 128, true));
     x += 24;
     root.append(
-      boxNode({ x, y: 90, w: 128, h: 76 }, 'Type III × 4', ['removes MB, applies', 'the next round’s 8-bit', 'bijections. + 24 Type IV.'], 'dg-core'),
+      boxNode(
+        { x, y: 90, w: 128, h: 76 },
+        'Type III × 4',
+        ['removes MB, applies', 'the next round’s 8-bit', 'bijections. + 24 Type IV.'],
+        'dg-core',
+      ),
     );
     root.append(tap(x + 64, 172));
     x += 128;
@@ -193,7 +204,10 @@ export function createDiagram(): DiagramView {
         boxNode(
           { x: ox, y: 292, w: 150, h: 54 },
           'Type IB × 16',
-          ['8 → 128 each, plus a', placement === 'compiled-in' ? '15-step tree. G, then G⁻¹.' : '15-step tree. Applies G.'],
+          [
+            '8 → 128 each, plus a',
+            placement === 'compiled-in' ? '15-step tree. G, then G⁻¹.' : '15-step tree. Applies G.',
+          ],
           'dg-ext',
         ),
       );
@@ -201,7 +215,9 @@ export function createDiagram(): DiagramView {
       root.append(arrow(ox - 12, 318, ox, 318, outputRemote));
     }
     root.append(
-      svg('text', { x: ox + 8, y: 314, class: 'dg-line' }, [outputRemote ? 'G(C) leaves the program' : 'C leaves the program']),
+      svg('text', { x: ox + 8, y: 314, class: 'dg-line' }, [
+        outputRemote ? 'G(C) leaves the program' : 'C leaves the program',
+      ]),
       svg('text', { x: ox + 8, y: 330, class: 'dg-line' }, [
         outputRemote ? '— not a ciphertext the' : '— a real AES ciphertext.',
       ]),

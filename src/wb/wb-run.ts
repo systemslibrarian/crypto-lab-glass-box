@@ -26,7 +26,15 @@
  */
 
 import { SHIFT_ROWS } from '../aes/aes-ref.js';
-import { COLUMNS, ROUNDS_WITH_MIXCOLUMNS, ROWS, typeIIIOffset, typeIIOffset, typeIVOffset, xorEncodedWord } from './layout.js';
+import {
+  COLUMNS,
+  ROUNDS_WITH_MIXCOLUMNS,
+  ROWS,
+  typeIIIOffset,
+  typeIIOffset,
+  typeIVOffset,
+  xorEncodedWord,
+} from './layout.js';
 import type { LinearSection, TraceWindow, WhiteBoxNetwork } from './types.js';
 
 /** Bits one 128-bit external section contributes to a trace. */

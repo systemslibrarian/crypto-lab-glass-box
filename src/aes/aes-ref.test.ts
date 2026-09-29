@@ -11,19 +11,13 @@ import {
 } from './aes-ref.js';
 import { GF_INV, SBOX } from './gf.js';
 
-const hex = (bytes: Uint8Array): string =>
-  [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-const unhex = (s: string): Uint8Array =>
-  new Uint8Array((s.match(/../g) ?? []).map((p) => parseInt(p, 16)));
+const hex = (bytes: Uint8Array): string => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+const unhex = (s: string): Uint8Array => new Uint8Array((s.match(/../g) ?? []).map((p) => parseInt(p, 16)));
 
 /** AES-ECB over one block, via WebCrypto AES-CBC with a zero IV. */
 async function webCryptoEcbBlock(key: Uint8Array, block: Uint8Array): Promise<Uint8Array> {
   const imported = await crypto.subtle.importKey('raw', key as BufferSource, 'AES-CBC', false, ['encrypt']);
-  const out = await crypto.subtle.encrypt(
-    { name: 'AES-CBC', iv: new Uint8Array(16) },
-    imported,
-    block as BufferSource,
-  );
+  const out = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: new Uint8Array(16) }, imported, block as BufferSource);
   // CBC with a zero IV over exactly one block is ECB over that block; the
   // second 16 bytes are the PKCS#7 padding block, which is discarded.
   return new Uint8Array(out).subarray(0, 16);

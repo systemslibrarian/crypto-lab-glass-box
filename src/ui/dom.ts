@@ -118,7 +118,10 @@ export function radioGroup(
     fs.append(
       el('div', { class: 'radio' }, [
         input,
-        el('label', { for: id }, [option.label, option.note ? el('span', { class: 'radio-note' }, [option.note]) : null]),
+        el('label', { for: id }, [
+          option.label,
+          option.note ? el('span', { class: 'radio-note' }, [option.note]) : null,
+        ]),
       ]),
     );
   }
@@ -150,7 +153,12 @@ export function select(
   return node;
 }
 
-export function button(id: string, label: string, kind: 'primary' | 'plain' | 'danger', onClick: () => void): HTMLButtonElement {
+export function button(
+  id: string,
+  label: string,
+  kind: 'primary' | 'plain' | 'danger',
+  onClick: () => void,
+): HTMLButtonElement {
   const node = el('button', { id, type: 'button', class: `btn ${kind}` }, [label]);
   node.addEventListener('click', onClick);
   return node;
@@ -163,7 +171,12 @@ export interface Cell {
   readonly node?: Node;
 }
 
-export function table(caption: string, headers: readonly string[], rows: readonly (readonly Cell[])[], cls = ''): HTMLElement {
+export function table(
+  caption: string,
+  headers: readonly string[],
+  rows: readonly (readonly Cell[])[],
+  cls = '',
+): HTMLElement {
   const thead = el('thead', {}, [
     el(
       'tr',

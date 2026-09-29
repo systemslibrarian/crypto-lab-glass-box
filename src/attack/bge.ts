@@ -50,13 +50,7 @@
  * bijections or the remote party.
  */
 
-import {
-  ROUNDS_WITH_MIXCOLUMNS,
-  typeIIIOffset,
-  typeIIOffset,
-  typeIVOffset,
-  xorEncodedWord,
-} from '../wb/layout.js';
+import { ROUNDS_WITH_MIXCOLUMNS, typeIIIOffset, typeIIOffset, typeIVOffset, xorEncodedWord } from '../wb/layout.js';
 
 /** Just the tables a column walk needs. Handed over as data, not imported. */
 export interface ColumnTables {

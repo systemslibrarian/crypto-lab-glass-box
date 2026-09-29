@@ -118,7 +118,7 @@ export async function settle(page: Page, budgetMs = 4000): Promise<void> {
       return false;
     },
     budgetMs,
-    { timeout: 20_000, polling: 'raf' }
+    { timeout: 20_000, polling: 'raf' },
   );
 }
 
@@ -235,14 +235,11 @@ export async function assertListSemantics(page: Page): Promise<void> {
   const broken = await page.$$eval('ul[role], ol[role]', (els) =>
     els
       .filter((e) => e.getAttribute('role') !== 'list' || e.children.length === 0)
-      .map(
-        (e) =>
-          `${e.tagName.toLowerCase()}[role=${e.getAttribute('role')}] with ${e.children.length} children`
-      )
+      .map((e) => `${e.tagName.toLowerCase()}[role=${e.getAttribute('role')}] with ${e.children.length} children`),
   );
   expect(
     broken,
-    'an explicit non-list role on a list deletes its semantics; an empty role="list" fails aria-required-children'
+    'an explicit non-list role on a list deletes its semantics; an empty role="list" fails aria-required-children',
   ).toEqual([]);
 }
 
@@ -284,13 +281,13 @@ export async function boot(page: Page, theme: 'dark' | 'light'): Promise<void> {
   await page.goto('.');
   expect(
     await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
-    'reduced-motion emulation must actually be in effect'
+    'reduced-motion emulation must actually be in effect',
   ).toBe(true);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   expect(theme, 'dark is the only theme this lab ships').toBe('dark');
   expect(
     await page.evaluate(() => Object.keys(localStorage).sort()),
-    'the theme is written under exactly one key'
+    'the theme is written under exactly one key',
   ).toEqual(['theme']);
   await assertSingleBanner(page);
   await assertListSemantics(page);
@@ -313,7 +310,7 @@ export async function boot(page: Page, theme: 'dark' | 'light'): Promise<void> {
   // leave a dead-but-known element; asserting the count at zero catches the day
   // one is added without going through that list.
   await expect(
-    page.locator('#theme-toggle, #themeToggle, .theme-toggle, .theme-toggle-btn, [data-theme-toggle]')
+    page.locator('#theme-toggle, #themeToggle, .theme-toggle, .theme-toggle-btn, [data-theme-toggle]'),
   ).toHaveCount(0);
 
   // ── Act 2 finished building and verifying a program ────────────────────
@@ -452,13 +449,10 @@ export async function expectScrollersReachable(page: Page, label: string): Promi
       .map(
         (el) =>
           `${el.tagName.toLowerCase()}.${(el.getAttribute('class') ?? '').trim()}` +
-          ` (${el.scrollWidth}x${el.scrollHeight} in ${el.clientWidth}x${el.clientHeight})`
+          ` (${el.scrollWidth}x${el.scrollHeight} in ${el.clientWidth}x${el.clientHeight})`,
       );
   });
-  expect(
-    Array.from(new Set(unreachable)),
-    `scrolling regions with no keyboard route in state: ${label}`
-  ).toEqual([]);
+  expect(Array.from(new Set(unreachable)), `scrolling regions with no keyboard route in state: ${label}`).toEqual([]);
 }
 
 /**
@@ -505,7 +499,7 @@ export async function expectNoInvisibleFocusTargets(page: Page, label: string): 
       if (took) {
         out.push(
           `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}.${(el.getAttribute('class') ?? '').trim()}` +
-            ` (opacity ${effective}, ${Math.round(r.width)}x${Math.round(r.height)})`
+            ` (opacity ${effective}, ${Math.round(r.width)}x${Math.round(r.height)})`,
         );
       }
     }
@@ -628,7 +622,7 @@ export function expectBaselineNotStale(): void {
   const unseen = Object.keys(NONTEXT_BASELINE).filter((k) => !nonTextSeen.has(k));
   expect(
     unseen,
-    'baselined non-text findings that no longer appear — delete them from nontext-baseline.ts (or restore the drive state that showed them)'
+    'baselined non-text findings that no longer appear — delete them from nontext-baseline.ts (or restore the drive state that showed them)',
   ).toEqual([]);
 }
 
@@ -736,11 +730,7 @@ export async function scan(page: Page, label: string): Promise<void> {
   // the default walk honours the same boundary, so this second call is the
   // ONLY thing that ever measures it. See `contrast.ts` for the inventory.
   const hiddenContrast = Array.from(
-    new Set(
-      formatContrastFailures(
-        await auditContrast(page, '[aria-hidden="true"], [aria-hidden="true"] *', true)
-      )
-    )
+    new Set(formatContrastFailures(await auditContrast(page, '[aria-hidden="true"], [aria-hidden="true"] *', true))),
   );
   softExpect(hiddenContrast, `measured aria-hidden contrast failures in state: ${label}`, []);
 
@@ -779,8 +769,33 @@ export async function scan(page: Page, label: string): Promise<void> {
  *    value. Each of those signals is written only after the worker has answered,
  *    which is what keeps an asynchronous page from being scanned half-painted.
  */
+/**
+ * Wait for an act to FINISH, not merely for its verdict to appear.
+ *
+ * Several of this page's verdicts read the same after a re-run as before it --
+ * rebuilding with a different seed still says "IT IS AES-128" -- and the first
+ * thing any click does is replace the status line with a progress message. So a
+ * wait on the verdict, or on the status merely changing, returns while the work
+ * is still running and every scan after it measures the previous state. The page
+ * prints a run counter in each status line for exactly this reason; this waits
+ * for it to advance, which only happens on completion.
+ */
+async function afterRun(page: Page, statusId: string, act: () => Promise<void>): Promise<void> {
+  const status = page.locator(`#${statusId}`);
+  const runNumber = async (): Promise<number> => {
+    const match = (await status.innerText()).match(/#(\d+)/);
+    return match ? Number(match[1]) : 0;
+  };
+  const before = await runNumber();
+  await act();
+  await expect.poll(runNumber, { timeout: 180_000 }).toBeGreaterThan(before);
+}
+
 export async function driveAllStates(page: Page, theme: string): Promise<void> {
   const scanAt = (s: string): Promise<void> => scan(page, `${theme} / ${s}`);
+  const build = (): Promise<void> => afterRun(page, 'build-status', () => page.locator('#build').click());
+  const traceIt = (): Promise<void> => afterRun(page, 'trace-status', () => page.locator('#trace').click());
+  const runDca = (): Promise<void> => afterRun(page, 'dca-status', () => page.locator('#run-dca').click());
 
   await scanAt('arrival: one verified program, nothing traced, nothing attacked');
 
@@ -804,7 +819,7 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await scanAt('Build: a key of the wrong length');
 
   await page.fill('#key-hex', '000102030405060708090a0b0c0d0e0f');
-  await page.locator('#build').click();
+  await build();
   await expect(page.locator('#build-verdict .pill-text')).toHaveText('IT IS AES-128');
   await expect(page.locator('#key-error')).toBeEmpty();
   await scanAt('Build: the key restored and the program rebuilt');
@@ -812,18 +827,18 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   // -- A seeded instance, which relabels the randomness line ---------------
   await page.fill('#seed', 'gate-seed');
   await page.locator('#seed').dispatchEvent('change');
-  await page.locator('#build').click();
+  await build();
   await expect(page.locator('#build-out')).toContainText('NOT secret');
   await scanAt('Build: a seeded instance -- reproducible, and labelled as not secret');
 
   // -- Every placement, because each repaints the diagram ------------------
   for (const placement of ['compiled-in', 'remote-both', 'remote-input', 'remote-output'] as const) {
-    await page.locator(`#placement-${placement}`).check();
+    await afterRun(page, 'build-status', () => page.locator(`#placement-${placement}`).check());
     await expect(page.locator('#build-verdict .pill-text')).toHaveText('IT IS AES-128');
     if (placement === 'compiled-in') await expect(page.locator('#encoder-note')).toBeVisible();
     await scanAt(`Build: external encodings ${placement} -- the diagram redrawn`);
   }
-  await page.locator('#placement-none').check();
+  await afterRun(page, 'build-status', () => page.locator('#placement-none').check());
   await expect(page.locator('#build-verdict .pill-text')).toHaveText('IT IS AES-128');
 
   // -- Act 3: a trace count the lab refuses, then one it accepts -----------
@@ -834,14 +849,13 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await scanAt('Trace: a count outside the stated range -- refused by name');
 
   await page.fill('#traces', '256');
-  await page.locator('#trace').click();
-  await expect(page.locator('#trace-status')).toContainText('Recorded');
+  await traceIt();
   await expect(page.locator('#trace-out table.matrix tbody tr')).toHaveCount(10);
   await expect(page.locator('#trace-error')).toBeEmpty();
   await scanAt('Trace: 256 traced encryptions, the segment map and the heatmap painted');
 
   // -- Act 4: the attack, with one target and then with both ---------------
-  await page.locator('#run-dca').click();
+  await runDca();
   await expect(page.locator('#dca-verdict')).toBeVisible();
   await expect(page.locator('#byte-strip .byte-cell')).toHaveCount(16);
   await expect(page.locator('#peaks-plot')).toHaveAttribute('aria-label', /Peak difference of means/);
@@ -858,8 +872,7 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await scanAt('DCA: a different key byte inspected');
 
   await page.locator('#target-inverse').check();
-  await page.locator('#run-dca').click();
-  await expect(page.locator('#dca-status')).toContainText('Scored');
+  await runDca();
   await scanAt('DCA: both targets combined');
 
   // -- The refusal path: no target at all ----------------------------------
@@ -873,17 +886,16 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   // -- The output side, which has one target and says why ------------------
   await page.locator('#surface-output').check();
   await expect(page.locator('#output-target-note')).toBeVisible();
-  await page.locator('#run-dca').click();
+  await runDca();
   await expect(page.locator('#dca-verdict')).toBeVisible();
   await scanAt('DCA: the output side, rounds 9 and 10');
   await page.locator('#surface-input').check();
 
   // -- Act 5: the state the negative claim is about ------------------------
-  await page.locator('#placement-remote-both').check();
+  await afterRun(page, 'build-status', () => page.locator('#placement-remote-both').check());
   await expect(page.locator('#build-verdict .pill-text')).toHaveText('IT IS AES-128');
-  await page.locator('#trace').click();
-  await expect(page.locator('#trace-status')).toContainText('Recorded');
-  await page.locator('#run-dca').click();
+  await traceIt();
+  await runDca();
   await expect(page.locator('#dca-verdict .pill-text')).toContainText('NO RECOVERY');
   await expect(page.locator('#no-hypothesis-note')).toBeVisible();
   await expect(page.locator('#neg-fixture [data-negative-claim="NEG-1"]')).toBeVisible();
@@ -893,7 +905,7 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   // -- Act 6: the algebraic attack -----------------------------------------
   await page.locator('#bge-round').selectOption('5');
   await page.locator('#bge-column').selectOption('2');
-  await page.locator('#run-bge').click();
+  await afterRun(page, 'bge-status', () => page.locator('#run-bge').click());
   await expect(page.locator('#bge-verdict .pill-text')).toHaveText('ENCODINGS STRIPPED TO AFFINE');
   await expect(page.locator('#bge-out table.matrix tbody tr')).toHaveCount(4);
   await scanAt('BGE: step A1 on round 5, column 2 -- the group and the collapsed spread');
@@ -936,11 +948,10 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await scanAt('the range slider focused');
 
   // -- Back to a plain program, traced and attacked ------------------------
-  await page.locator('#placement-none').check();
+  await afterRun(page, 'build-status', () => page.locator('#placement-none').check());
   await expect(page.locator('#build-verdict .pill-text')).toHaveText('IT IS AES-128');
-  await page.locator('#trace').click();
-  await expect(page.locator('#trace-status')).toContainText('Recorded');
-  await page.locator('#run-dca').click();
+  await traceIt();
+  await runDca();
   await expect(page.locator('#dca-verdict')).toBeVisible();
   await expect(page.locator('#placement-log table.matrix tbody tr')).not.toHaveCount(0);
   await scanAt('the placement log with several measured rows, back on a plain program');

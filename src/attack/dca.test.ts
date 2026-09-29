@@ -287,7 +287,8 @@ describe('Act 5: where the external encodings live', () => {
       const verdict = judgeRecovery(result.recovered, lastRoundKey);
       const confident = result.bytes.filter((b) => b.margin >= 0.15);
       expect(confident.length, `${seed} confident`).toBeGreaterThanOrEqual(4);
-      for (const b of confident) expect(result.recovered[b.index], `${seed} byte ${b.index}`).toBe(lastRoundKey[b.index]);
+      for (const b of confident)
+        expect(result.recovered[b.index], `${seed} byte ${b.index}`).toBe(lastRoundKey[b.index]);
       // Partial: better than chance, and not complete.
       expect(verdict.correctCount, `${seed} k10`).toBeGreaterThanOrEqual(4);
       expect(verdict.complete, `${seed} complete`).toBe(false);
@@ -318,9 +319,9 @@ describe('invariant I3 and the fail-closed paths', () => {
   it('refuses a misaligned stride, a short known array, no target and an empty window', () => {
     const { request } = mount('none', 't0', 64);
     expect(() => runDca({ ...request, stride: 3, targets: ['sbox-output'], bits4: [0] })).toThrow(/32-bit words/);
-    expect(() =>
-      runDca({ ...request, known: new Uint8Array(5), targets: ['sbox-output'], bits4: [0] }),
-    ).toThrow(/16 observed bytes/);
+    expect(() => runDca({ ...request, known: new Uint8Array(5), targets: ['sbox-output'], bits4: [0] })).toThrow(
+      /16 observed bytes/,
+    );
     expect(() => runDca({ ...request, targets: [], bits4: [0] })).toThrow(/at least one target/);
     expect(() => runDca({ ...request, targets: ['sbox-output'], bits4: [] })).toThrow(/at least one target/);
     expect(() => runDca({ ...request, sampleCount: 0, targets: ['sbox-output'], bits4: [0] })).toThrow(

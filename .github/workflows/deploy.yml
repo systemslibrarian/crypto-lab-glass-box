@@ -1,0 +1,143 @@
+name: Deploy to GitHub Pages
+
+# One workflow, three triggers, and the deploy gated behind every test.
+#
+#   push          - the ordinary path: land on main, gate, publish.
+#   pull_request  - the gate has to judge PRs too, or Dependabot opens bumps
+#                   with no CI signal on any of them (this fleet reached 1,461
+#                   such PRs across 176 repos). A PR is tested, never published.
+#   workflow_dispatch - required by the auto-merge job below. A merge performed
+#                   with secrets.GITHUB_TOKEN raises NO push event -- GitHub
+#                   suppresses them so workflows cannot retrigger themselves --
+#                   so without an explicit dispatch a merged bump lands on main
+#                   and the live site keeps serving the previous build, with no
+#                   red run anywhere to say so.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  # NOT a bare `pages`: with cancel-in-progress, a PR run would cancel a live
+  # main deploy.
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Several times the measured run. The suites here take about 3 and a half
+    # minutes locally: the unit suite builds dozens of 2,032-table white-box
+    # networks and checks them against WebCrypto, and the browser gate drives
+    # thirty-odd states at three viewport widths. GitHub's default is 360
+    # minutes, which is where a hung job silently burns six hours.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The WHOLE suite gates the publish, not just the a11y half. A 2026-08-14
+      # sweep found 29 repos running test:a11y alone, so their correctness
+      # suites never blocked anything -- and in this lab the correctness suite
+      # is the part that proves the table network really computes AES.
+      - name: Unit tests (Vitest, incl. FIPS 197 and SP 800-38A KATs)
+        run: npm test
+
+      - name: Build (typecheck gates the build)
+        run: npm run build
+
+      # NEVER --with-deps. That apt step wedged 547 CI runs across this fleet;
+      # the ubuntu-latest image already carries the shared libraries Chromium
+      # needs.
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+
+      - name: Accessibility gate (axe-core, WCAG 2.1 A/AA)
+        run: npm run test:a11y
+
+      - name: Claims suite (does the page tell the truth?)
+        run: npm run test:claims
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # NOT `== 'push'`. That would also skip workflow_dispatch, which is the one
+    # trigger the auto-merge job depends on: the dispatched run would build,
+    # pass the gate, skip this job, and the site would still never update.
+    if: github.event_name != 'pull_request'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
+
+  # Dependabot only. `needs: build` is the whole safety argument -- the gate
+  # decides, not the version number. A bump that breaks this lab fails the unit
+  # tests, the build, the a11y gate or the claims suite, and the PR stays open
+  # for a human.
+  dependabot-auto-merge:
+    needs: build
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      # Required by the deploy dispatch below. Without it `gh workflow run`
+      # returns HTTP 403 "Resource not accessible by integration", the merged
+      # bump never deploys, and a `|| echo` fallback hides it.
+      actions: write
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v3
+
+      - name: Merge any bump whose gate went green
+        # Retry: a sibling PR merging first moves main underneath us and GitHub
+        # rejects with "Base branch was modified". That is benign, so try again
+        # rather than failing the run over a race.
+        run: |
+          merged=""
+          for attempt in 1 2 3; do
+            if gh pr merge --squash --delete-branch "$PR_URL"; then
+              merged=1
+              break
+            fi
+            echo "merge attempt $attempt failed; base branch may have moved - retrying"
+            sleep 15
+          done
+          if [ -z "$merged" ]; then
+            echo "::warning::gate passed but the merge did not land after 3 attempts;"
+            echo "::warning::leaving this PR open - Dependabot will rebase and retry."
+            exit 0
+          fi
+          # A merge made with GITHUB_TOKEN raises no push event -- GitHub suppresses
+          # them so workflows cannot retrigger themselves -- so deploy would never run
+          # and the site would keep serving the previous build. Ask for it explicitly;
+          # a workflow_dispatch through the API is not suppressed. The dispatched run
+          # is the same gate-then-deploy pipeline, so a bad merge still ships nothing.
+          #
+          # Dispatch the file THIS lab has: most are deploy.yml, some deploy-pages.yml
+          # or pages.yml. A copied name 404s only on the auto-merge path, after the
+          # merge has landed. See the template's section 6.2.
+          gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

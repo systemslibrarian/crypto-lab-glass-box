@@ -155,7 +155,7 @@ export function randomInvertible(n: number, rng: ByteSource): { m: BitMatrix; in
     const raw = rng.bytes(n * m.words * 4);
     for (let i = 0; i < m.rows.length; i++) {
       const o = i * 4;
-      m.rows[i] = ((raw[o] | (raw[o + 1] << 8) | (raw[o + 2] << 16) | (raw[o + 3] << 24)) >>> 0);
+      m.rows[i] = (raw[o] | (raw[o + 1] << 8) | (raw[o + 2] << 16) | (raw[o + 3] << 24)) >>> 0;
     }
     // Zero the bits past column n-1 so the matrix really is n x n.
     const slack = n & 31;

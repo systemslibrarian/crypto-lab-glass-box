@@ -59,16 +59,7 @@ import {
   type Wire,
   xorWireTables,
 } from './encoding.js';
-import {
-  apply128,
-  apply32,
-  apply8,
-  byteOfWord,
-  randomInvertible,
-  rows32,
-  rows8,
-  wordOfBytes,
-} from '../math/gf2.js';
+import { apply128, apply32, apply8, byteOfWord, randomInvertible, rows32, rows8, wordOfBytes } from '../math/gf2.js';
 import {
   BLOCK_TREE_STEPS,
   COLUMNS,
@@ -463,17 +454,38 @@ export function buildNetwork(key: Uint8Array, placement: EncodingPlacement, rng:
   }
   if (hasInputEncoding(placement) && drawnF) {
     preCore.push(
-      buildLinearSection('strip-in', 'F⁻¹, stripped inside the core', drawnF.inv.rows, identity32Nibbles, coreInputWire, rng),
+      buildLinearSection(
+        'strip-in',
+        'F⁻¹, stripped inside the core',
+        drawnF.inv.rows,
+        identity32Nibbles,
+        coreInputWire,
+        rng,
+      ),
     );
   }
   if (hasOutputEncoding(placement) && drawnG) {
     postCore.push(
-      buildLinearSection('add-out', 'G, applied inside the core', drawnG.m.rows, coreOutputWire, identity32Nibbles, rng),
+      buildLinearSection(
+        'add-out',
+        'G, applied inside the core',
+        drawnG.m.rows,
+        coreOutputWire,
+        identity32Nibbles,
+        rng,
+      ),
     );
   }
   if (placement === 'compiled-in' && drawnG) {
     postCore.push(
-      buildLinearSection('decode-out', 'G⁻¹, the output decoder', drawnG.inv.rows, identity32Nibbles, identity32Nibbles, rng),
+      buildLinearSection(
+        'decode-out',
+        'G⁻¹, the output decoder',
+        drawnG.inv.rows,
+        identity32Nibbles,
+        identity32Nibbles,
+        rng,
+      ),
     );
   }
 

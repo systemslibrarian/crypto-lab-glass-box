@@ -31,13 +31,7 @@ import { describe, expect, it } from 'vitest';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-const FORBIDDEN = [
-  '../wb/wb-gen.js',
-  '../wb/remote-enc.js',
-  '../wb/rng.js',
-  '../wb/encoding.js',
-  '../wb/wb-run.js',
-];
+const FORBIDDEN = ['../wb/wb-gen.js', '../wb/remote-enc.js', '../wb/rng.js', '../wb/encoding.js', '../wb/wb-run.js'];
 
 const ALLOWED = new Set([
   '../aes/aes-ref.js',
