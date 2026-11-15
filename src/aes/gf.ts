@@ -17,7 +17,8 @@ export const AES_POLY = 0x11b;
 
 /**
  * Multiply by x (i.e. by 0x02) in GF(2^8), reducing mod m(x) on overflow.
- * FIPS 197 section 4.2.1 calls this xtime.
+ * FIPS 197 (2001) section 4.2.1 calls this xtime; the 2023 update's section 4.2
+ * calls it XTIMES().
  */
 export function xtime(a: number): number {
   const shifted = a << 1;

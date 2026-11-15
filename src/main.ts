@@ -290,7 +290,7 @@ function scopeSection(): HTMLElement {
         list([
           'The cipher. AES-128 exactly as FIPS 197 defines it, with the S-box assembled from the GF(2⁸) inverse and the section 5.1.1 affine map rather than pasted from a table.',
           'The white-box construction. Chow’s table network at full size: T-boxes with the round key folded in, Tyᵢ tables for MixColumns, nibble XOR tables, random 4-bit internal encodings on every wire, and the 8×8 and 32×32 GF(2) mixing bijections of his section 3.2. Nothing is left out to make a picture simpler.',
-          'The check. Every program this page builds is compared against WebCrypto — an independent AES — on random blocks, and against the FIPS 197 Appendix C.1 vector, before you are told it works.',
+          'The check. Every program this page builds is compared against WebCrypto — an independent AES — on random blocks, and against the FIPS 197 (2001) Appendix C.1 vector, before you are told it works.',
           'The attack. Difference of means over a software execution trace, exactly the distinguisher Bos et al. use, scoring all 4,096 hypotheses with no knowledge of the encodings.',
           'The algebra. Step A1 of Billet, Gilbert and Ech-Chatbi’s attack, run live on the tables.',
         ]),
@@ -547,14 +547,14 @@ function renderBuild(report: BuildReport | null): void {
         ok
           ? `The table network agrees with ${
               v.webCryptoAvailable ? 'WebCrypto' : 'this repository’s own reference'
-            } on ${v.randomBlocksMatching} of ${v.randomBlocks} random blocks, and reproduces the FIPS 197 Appendix C.1 vector.`
+            } on ${v.randomBlocksMatching} of ${v.randomBlocks} random blocks, and reproduces the FIPS 197 (2001) Appendix C.1 vector.`
           : `Only ${v.randomBlocksMatching} of ${v.randomBlocks} random blocks matched, and the FIPS vector ${
               v.fipsVectorMatches ? 'did' : 'did not'
             } reproduce. Something in the network is wrong.`,
       ]),
     ]),
     definitionList([
-      ['FIPS 197 C.1 through the network', el('span', { class: 'mono' }, [group4(v.fipsCiphertextHex)])],
+      ['FIPS 197 (2001) C.1 through the network', el('span', { class: 'mono' }, [group4(v.fipsCiphertextHex)])],
       ['External encodings', PLACEMENT_LABELS[report.placement]],
       [
         'Encodings drawn from',
@@ -606,7 +606,7 @@ function buildSection(): HTMLElement {
   const controls = panel('controls');
   controls.append(
     el('div', { class: 'control-row' }, [
-      field('key-hex', 'AES-128 key (32 hex digits)', keyInput, 'The default is the FIPS 197 Appendix C.1 key.'),
+      field('key-hex', 'AES-128 key (32 hex digits)', keyInput, 'The default is the FIPS 197 (2001) Appendix C.1 key.'),
       button('generate-key', 'Generate a key', 'plain', () => {
         keyInput.value = randomKeyHex();
         state.keyOrigin = 'generated';

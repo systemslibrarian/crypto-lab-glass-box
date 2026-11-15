@@ -117,7 +117,7 @@ export type RequestBody = BuildRequest | TraceRequest | DcaRunRequest | HeatmapR
 export type LabRequest = RequestBody & { readonly id: number };
 
 export interface VerificationReport {
-  /** FIPS 197 Appendix C.1, run through the table network end to end. */
+  /** FIPS 197 (2001) Appendix C.1, run through the table network end to end. */
   readonly fipsVectorMatches: boolean;
   readonly fipsCiphertextHex: string;
   /** Random blocks compared against WebCrypto, the independent path. */

@@ -93,7 +93,7 @@ button for you, because causing the failure is the point.
 2. **Build the glass box.** Enter or generate an AES-128 key. The page compiles it
    into the table network in your browser and then checks that network against
    WebCrypto — an independent AES — on random blocks, and against the FIPS 197
-   Appendix C.1 vector, before telling you anything else. The table inventory and
+   (2001) Appendix C.1 vector, before telling you anything else. The table inventory and
    the program size are read off the arrays that were allocated. A diagram of one
    column draws encoded wires solid and un-encoded ones hollow, puts remote
    encodings outside the program boundary, and has no box holding the key.
@@ -279,6 +279,16 @@ This lab records 1,792 bits for its own first round — two independent
 implementations of the same construction, recording the same round, within eight
 per cent of each other.
 
+**Standards reviewed 15 November 2026:** FIPS 197 references marked "(2001)" use
+the numbering of the original edition, which sits on the
+[FIPS 197 publication page](https://csrc.nist.gov/pubs/fips/197/final) alongside
+the 2023 update. Section 4.2.1 `xtime`, the §4.2 product {57}·{83} = {c1} and the
+Figure 7 S-box table exist only in the 2001 edition — the 2023 update folds
+`xtime` into §4.2 as XTIMES(), works {57}·{13} = {fe} instead, and prints the
+S-box as Table 4 — and the Appendix C.1 vector is printed only in 2001; the
+update's Appendix C points to NIST's online examples instead. Appendix A.1 and
+the Appendix B cipher example appear in both editions.
+
 ---
 
 ## Related Demos
@@ -317,10 +327,10 @@ per cent of each other.
 
 | KAT | Where |
 |---|---|
-| FIPS 197 section 4.2.1 `xtime`, and the section 4.2 product {57}.{83} = {c1} | `src/aes/gf.test.ts` |
-| FIPS 197 Figure 7 S-box, row 0 and six named entries, checked against an S-box ASSEMBLED from the field inverse and the section 5.1.1 affine map | `src/aes/gf.test.ts` |
+| FIPS 197 (2001) section 4.2.1 `xtime`, and the section 4.2 product {57}.{83} = {c1} | `src/aes/gf.test.ts` |
+| FIPS 197 (2001) Figure 7 S-box, row 0 and six named entries, checked against an S-box ASSEMBLED from the field inverse and the section 5.1.1 affine map | `src/aes/gf.test.ts` |
 | FIPS 197 Appendix A.1 key expansion, w[4]..w[7] and w[40]..w[43] | `src/aes/aes-ref.test.ts` |
-| FIPS 197 Appendix B cipher example, and Appendix C.1 | `src/aes/aes-ref.test.ts` |
+| FIPS 197 Appendix B cipher example, and FIPS 197 (2001) Appendix C.1 | `src/aes/aes-ref.test.ts` |
 | NIST SP 800-38A F.1.1 ECB-AES128, all four blocks | `src/aes/aes-ref.test.ts` |
 | The same four vector sets again, through the TABLE NETWORK, in all five external-encoding placements | `src/wb/wb-run.test.ts` |
 | WebCrypto cross-check: 300 random (key, block) pairs against the reference, and 20 keys x 5 blocks x 5 placements through the network | `src/aes/aes-ref.test.ts`, `src/wb/wb-run.test.ts` |

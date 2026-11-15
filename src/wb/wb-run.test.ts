@@ -28,8 +28,8 @@ function endToEnd(key: Uint8Array, placement: EncodingPlacement, seed: string) {
 }
 
 describe('invariant I1: the network is AES-128, in every encoding mode', () => {
-  // KAT: FIPS 197 Appendix C.1, through the table network rather than the cipher.
-  it.each(ENCODING_PLACEMENTS)('FIPS 197 Appendix C.1 under placement %s', (placement) => {
+  // KAT: FIPS 197 (2001) Appendix C.1, through the table network rather than the cipher.
+  it.each(ENCODING_PLACEMENTS)('FIPS 197 (2001) Appendix C.1 under placement %s', (placement) => {
     const { encrypt } = endToEnd(unhex('000102030405060708090a0b0c0d0e0f'), placement, `kat ${placement}`);
     expect(hex(encrypt(unhex('00112233445566778899aabbccddeeff')))).toBe('69c4e0d86a7b0430d8cdb78070b4c55a');
   });

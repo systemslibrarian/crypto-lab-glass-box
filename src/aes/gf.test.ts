@@ -6,14 +6,14 @@ describe('GF(2^8) arithmetic', () => {
     expect(AES_POLY).toBe(0x11b);
   });
 
-  it('xtime matches the worked examples in FIPS 197 section 4.2.1', () => {
+  it('xtime matches the worked examples in FIPS 197 (2001) section 4.2.1', () => {
     // {57} . {02} = {ae}, and {57} . {04} = {47} after one more reduction.
     expect(xtime(0x57)).toBe(0xae);
     expect(xtime(0xae)).toBe(0x47);
     expect(xtime(0x47)).toBe(0x8e);
   });
 
-  it('reproduces the FIPS 197 section 4.2 product {57} . {83} = {c1}', () => {
+  it('reproduces the FIPS 197 (2001) section 4.2 product {57} . {83} = {c1}', () => {
     expect(gmul(0x57, 0x83)).toBe(0xc1);
   });
 
@@ -47,7 +47,8 @@ describe('the S-box, assembled rather than transcribed', () => {
   });
 
   // KAT: the published S-box values at the four corners of the FIPS 197
-  // table (section 5.1.1, Figure 7) plus the two the standard's own prose
+  // table (section 5.1.1; Figure 7 in the 2001 edition, Table 4 in the 2023
+  // update) plus the two the standard's own prose
   // names. If the field arithmetic or the affine map is wrong, these move.
   it('matches the published S-box at the corners and named entries', () => {
     expect(SBOX[0x00]).toBe(0x63);

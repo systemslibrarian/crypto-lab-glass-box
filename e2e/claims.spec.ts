@@ -23,7 +23,7 @@ import { expect, test, type Page } from '@playwright/test';
  *   PARTS SUM TO WHOLE    the table types sum to the program; the trace segments
  *                         sum to the bits per trace.
  *
- * And one external authority that is not the page: the FIPS 197 Appendix C.1
+ * And one external authority that is not the page: the FIPS 197 (2001) Appendix C.1
  * vector, and WebCrypto, which the page runs itself on random blocks and reports
  * the result of.
  */
@@ -192,7 +192,7 @@ test.describe('Act 2: what the page says it built', () => {
   });
 
   test('it really is AES: the FIPS vector on screen, and WebCrypto on 120 random blocks', async ({ page }) => {
-    // The one authority here that is not the page. The FIPS 197 Appendix C.1
+    // The one authority here that is not the page. The FIPS 197 (2001) Appendix C.1
     // ciphertext is fixed by the standard, and the random-block comparison is
     // run by the shipped code against WebCrypto -- an independent AES -- with
     // the result reported rather than assumed. Five placements, three keys
@@ -211,7 +211,7 @@ test.describe('Act 2: what the page says it built', () => {
         expect(match![1]).toBe(match![2]);
         compared += Number(match![1]);
         // The FIPS vector is checked on its own instance, every build.
-        expect(await definition(page, '#build-out', 'FIPS 197 C.1 through the network')).toBe(FIPS_C1_CIPHERTEXT);
+        expect(await definition(page, '#build-out', 'FIPS 197 (2001) C.1 through the network')).toBe(FIPS_C1_CIPHERTEXT);
         // The key really was regenerated rather than reused.
         expect(await page.locator('#key-hex').inputValue()).toMatch(/^[0-9a-f]{32}$/);
       }

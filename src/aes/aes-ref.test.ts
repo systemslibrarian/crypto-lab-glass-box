@@ -76,8 +76,8 @@ describe('ShiftRows', () => {
 });
 
 describe('AES-128 encryption known-answer tests', () => {
-  // KAT: FIPS 197 Appendix C.1 (AES-128).
-  it('FIPS 197 Appendix C.1', () => {
+  // KAT: FIPS 197 (2001) Appendix C.1 (AES-128).
+  it('FIPS 197 (2001) Appendix C.1', () => {
     const ct = aes128Encrypt(unhex('000102030405060708090a0b0c0d0e0f'), unhex('00112233445566778899aabbccddeeff'));
     expect(hex(ct)).toBe('69c4e0d86a7b0430d8cdb78070b4c55a');
   });
