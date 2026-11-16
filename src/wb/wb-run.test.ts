@@ -66,7 +66,13 @@ describe('invariant I1: the network is AES-128, in every encoding mode', () => {
         }
       }
     },
-    120_000,
+    // One timeout for all five placements, so it has to clear the slowest.
+    // Measured 2026-11-15 on a quiet machine, worst case `compiled-in`:
+    // 8118/8307/8429 ms run standalone, 8607 ms inside the full parallel
+    // `npm test`. 20000 ms is a little over twice the worst of those. Almost
+    // all of it is setup, not assertion: 20 `buildNetwork` calls are 99.5% of
+    // the body, the 100 WebCrypto comparisons 0.3%.
+    20_000,
   );
 
   it('an unseeded instance from crypto.getRandomValues is AES too', async () => {
