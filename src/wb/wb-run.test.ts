@@ -66,14 +66,15 @@ describe('invariant I1: the network is AES-128, in every encoding mode', () => {
         }
       }
     },
-    // One timeout for all five placements, so it has to clear the slowest.
-    // The runner it protects is slower than this laptop: the worst case,
-    // `compiled-in`, measured 10703 ms here over five runs on a quiet machine
-    // and 13618 ms on ubuntu-latest / Node 22, so 20000 ms is a 1.47x margin
-    // over the CI figure that governs. Almost all of it is setup, not
-    // assertion: 20 `buildNetwork` calls are 99.5% of the body, the 100
-    // WebCrypto comparisons 0.3%.
-    20_000,
+    // One timeout for all five placements, so it has to clear the slowest,
+    // `compiled-in`. The runner it protects is slower than this laptop: the
+    // last five green runs on main measured that case at 11333, 13240, 13401,
+    // 14036 and 14615 ms on ubuntu-latest / Node 22, against a local max of
+    // 10703 ms over five runs on a quiet machine. The CI maximum governs, so
+    // this is sized at 2x 14615 ms (run 42745441499): 29500 ms, a 2.02x
+    // margin. Almost all of it is setup, not assertion: 20 `buildNetwork`
+    // calls are 99.5% of the body, the 100 WebCrypto comparisons 0.3%.
+    29_500,
   );
 
   it('an unseeded instance from crypto.getRandomValues is AES too', async () => {
@@ -128,7 +129,10 @@ describe('the table inventory is computed, not asserted', () => {
       expect(tables).toBe(groups.reduce((n, g) => n + g.count, 0));
       expect(bytes).toBe(groups.reduce((n, g) => n + g.bytes, 0));
     }
-  });
+  },
+    // CI max 2690 ms (run 42745441499); 2x rule gives 5380, so 5500 is a 2.04x margin.
+    5_500,
+  );
 
   it('counts the table types Chow’s construction calls for', () => {
     const { network } = buildNetwork(new Uint8Array(16), 'none', seededRng('counts'));
@@ -153,7 +157,10 @@ describe('the table inventory is computed, not asserted', () => {
     expect(counts['remote-output']).toBe(counts['remote-input']);
     expect(counts['remote-both'] - counts['none']).toBe(2 * (counts['remote-input'] - counts['none']));
     expect(counts['compiled-in'] - counts['none']).toBe(2 * (counts['remote-both'] - counts['none']));
-  });
+  },
+    // CI max 2690 ms (run 42745441499); 2x rule gives 5380, so 5500 is a 2.04x margin.
+    5_500,
+  );
 
   it('the packed total is smaller than the allocated total, by the 4-bit tables', () => {
     const { network } = buildNetwork(new Uint8Array(16), 'none', seededRng('packed'));
@@ -177,7 +184,10 @@ describe('the recorded trace', () => {
       expect(set.totalBits).toBe(map.totalBits);
       expect(set.bits.length).toBe(map.totalBits * set.stride);
     }
-  });
+  },
+    // CI max 2690 ms (run 42745441499); 2x rule gives 5380, so 5500 is a 2.04x margin.
+    5_500,
+  );
 
   it('the core contributes 9 x 1792 + 128 bits whatever the placement', () => {
     for (const placement of ENCODING_PLACEMENTS) {
@@ -189,7 +199,10 @@ describe('the recorded trace', () => {
       expect(map.windows['last-rounds'].bits).toBe(1792 + 128);
       expect(map.windows['whole-program'].bits).toBe(map.totalBits);
     }
-  });
+  },
+    // CI max 2690 ms (run 42745441499); 2x rule gives 5380, so 5500 is a 2.04x margin.
+    5_500,
+  );
 
   it('traceSetBytes predicts the allocation before it happens', () => {
     const { network } = buildNetwork(new Uint8Array(16), 'none', seededRng('size'));
