@@ -67,11 +67,12 @@ describe('invariant I1: the network is AES-128, in every encoding mode', () => {
       }
     },
     // One timeout for all five placements, so it has to clear the slowest.
-    // Measured 2026-11-15 on a quiet machine, worst case `compiled-in`:
-    // 8118/8307/8429 ms run standalone, 8607 ms inside the full parallel
-    // `npm test`. 20000 ms is a little over twice the worst of those. Almost
-    // all of it is setup, not assertion: 20 `buildNetwork` calls are 99.5% of
-    // the body, the 100 WebCrypto comparisons 0.3%.
+    // The runner it protects is slower than this laptop: the worst case,
+    // `compiled-in`, measured 10703 ms here over five runs on a quiet machine
+    // and 13618 ms on ubuntu-latest / Node 22, so 20000 ms is a 1.47x margin
+    // over the CI figure that governs. Almost all of it is setup, not
+    // assertion: 20 `buildNetwork` calls are 99.5% of the body, the 100
+    // WebCrypto comparisons 0.3%.
     20_000,
   );
 
