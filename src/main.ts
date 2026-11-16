@@ -1729,7 +1729,7 @@ function placementSection(): HTMLElement {
   const body = panel();
   body.append(
     el('p', {}, [
-      'The thing most people expect is that turning external encodings on makes DCA fail. It does not. Bos et al. built two challenges from one implementation, with and without external encodings, and report in section 5.4 that the encoded one "gave similar results — this was expected as there is no difference, from our adversary perspective, when applying external encodings or omitting them since in both cases we have knowledge of the original plaintexts before any encoding is applied". Which is obvious once said: ',
+      'The thing most people expect is that turning external encodings on makes DCA fail. It does not. Bos et al. built two challenges from one implementation, with and without external encodings, and report in section 5.4 that the encoded one "gave similar results. This was expected as there is no difference, from our adversary perspective, when applying external encodings or omitting them since in both cases we have knowledge of the original plaintexts before any encoding is applied." Which is obvious once said: ',
       el('strong', {}, ['the attacker chooses the plaintext going in.']),
       ' If the encoder is inside the program, the attacker can always get from a plaintext they picked to the value the AES core sees, so the first-round hypotheses are as valid as ever.',
     ]),
