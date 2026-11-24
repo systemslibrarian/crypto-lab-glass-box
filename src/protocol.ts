@@ -3,7 +3,7 @@
  * lab can raise.
  *
  * ON THE FAILURE CODES, which is a point worth making rather than a formality:
- * every code below belongs to THIS LAB'S input validation. The white-box program
+ * the codes below belong to THIS LAB'S validation and calculation transport. The white-box program
  * has none. It cannot tell that it is being traced, cannot refuse to run, and
  * raises nothing when its key is being extracted -- there is no code for that,
  * because a table network has no way to notice. The page says so where a reader
@@ -32,8 +32,11 @@ export const LAB_FAILURE_CODES = [
 ] as const;
 export type LabFailureCode = (typeof LAB_FAILURE_CODES)[number];
 
+/** The browser could no longer exchange calculations with its worker. */
+export const TRANSPORT_FAILURE_CODES = ['WORKER_UNAVAILABLE'] as const;
+
 /** Every code the page can surface, the lab's and the algebraic attack's. */
-export type FailureCode = LabFailureCode | BgeFailureCode;
+export type FailureCode = LabFailureCode | BgeFailureCode | (typeof TRANSPORT_FAILURE_CODES)[number];
 
 export const MIN_TRACES = 8;
 /**
@@ -58,9 +61,9 @@ export const DEFAULT_TRACES = 384;
  * same trace count costs twice as much in one placement as in another, and a cap
  * expressed only in traces would be either wrong or needlessly small.
  *
- * At 7 MB this guard is live rather than decorative: the plain, remote-both and
- * one-sided placements all reach 2,048 traces (4.03, 5.97 and 5.00 MB), and the
- * compiled-in placement is refused above 1,792 (7.91 MB at 2,048). That the guard
+ * At 7 MiB this guard is live rather than decorative: the plain, remote-both and
+ * one-sided placements all reach 2,048 traces (4.03, 5.97 and 5.00 MiB), and the
+ * compiled-in placement is refused above 1,792 (7.91 MiB at 2,048). That the guard
  * bites on exactly the placement whose program is twice the size is the thing
  * worth noticing, so the refusal says the size out loud.
  */

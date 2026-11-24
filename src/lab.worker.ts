@@ -236,9 +236,9 @@ function handleTrace(id: number, traces: number): void {
   if (predicted > TRACE_BUDGET_BYTES) {
     throw new LabError(
       'TRACE_BUDGET_EXCEEDED',
-      `${traces} traces of ${map.totalBits} bits would need ${(predicted / 1048576).toFixed(1)} MB, over this lab's ${(
+      `${traces} traces of ${map.totalBits} bits would need ${(predicted / 1048576).toFixed(1)} MiB, over this lab's ${(
         TRACE_BUDGET_BYTES / 1048576
-      ).toFixed(0)} MB budget. The size is computed before anything is allocated.`,
+      ).toFixed(0)} MiB budget. The size is computed before anything is allocated.`,
     );
   }
   const startedAt = Date.now();

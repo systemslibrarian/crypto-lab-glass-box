@@ -12,12 +12,14 @@
  */
 
 import './styles.css';
+import { bgePassed, verificationPassed } from './ui/evidence.js';
 import {
   DEFAULT_TRACES,
   LAB_FAILURE_CODES,
   MAX_TRACES,
   MIN_TRACES,
   TRACE_BUDGET_BYTES,
+  TRANSPORT_FAILURE_CODES,
   type BgeReport,
   type BuildReport,
   type DcaReport,
@@ -59,6 +61,9 @@ const worker = new Worker(new URL('./lab.worker.ts', import.meta.url), {
   type: 'module',
 });
 let nextId = 1;
+let workerFailure: Error | null = null;
+let inspectorEpoch = 0;
+let programFingerprint: string | null = null;
 
 interface Pending {
   resolve(value: Extract<LabResponse, { kind: string }>): void;
@@ -85,10 +90,19 @@ worker.addEventListener('message', (event: MessageEvent<LabResponse>) => {
   entry.resolve(message);
 });
 
+function failWorker(): void {
+  workerFailure = new Error('WORKER_UNAVAILABLE — the calculation worker stopped. Reload the page to retry.');
+  for (const entry of pending.values()) entry.reject(workerFailure);
+  pending.clear();
+}
+worker.addEventListener('error', failWorker);
+worker.addEventListener('messageerror', failWorker);
+
 function ask<T extends { kind: string }>(
   request: RequestBody,
   onProgress: (phase: string, done: number, total: number) => void = () => {},
 ): Promise<T> {
+  if (workerFailure) return Promise.reject(workerFailure);
   const id = nextId++;
   return new Promise<T>((resolve, reject) => {
     pending.set(id, {
@@ -96,7 +110,12 @@ function ask<T extends { kind: string }>(
       reject,
       onProgress,
     });
-    worker.postMessage({ ...request, id });
+    try {
+      worker.postMessage({ ...request, id });
+    } catch (error) {
+      pending.delete(id);
+      reject(error);
+    }
   });
 }
 
@@ -105,7 +124,7 @@ function ask<T extends { kind: string }>(
 const byteHex = (v: number): string => v.toString(16).padStart(2, '0');
 const group4 = (hex: string): string => (hex.match(/.{1,8}/g) ?? []).join(' ');
 const bytesHuman = (n: number): string =>
-  n >= 1048576 ? `${(n / 1048576).toFixed(2)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} bytes`;
+  n >= 1048576 ? `${(n / 1048576).toFixed(2)} MiB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KiB` : `${n} bytes`;
 const count = (n: number): string => n.toLocaleString('en-US');
 const percent = (x: number): string => `${(x * 100).toFixed(1)}%`;
 
@@ -176,6 +195,10 @@ interface LabState {
     traceBits: number;
     recovers: 'key' | 'last-round-key';
     hypothesisValid: boolean;
+    experiment: string | null;
+    bits: readonly number[];
+    distinguisher: Distinguisher;
+    recoveredHex: string;
   }[];
   bge: BgeReport | null;
 }
@@ -316,7 +339,7 @@ function scopeSection(): HTMLElement {
     details('The failure codes this lab can raise — and the one the program cannot', (out) => {
       out.append(
         el('p', {}, [
-          'Every code below belongs to this page’s input validation. The white-box program has none. It cannot tell that it is being traced, it cannot refuse to run, and it raises nothing while its key is being extracted — a table network has no way to notice. The absence is the exhibit, not an omission.',
+          'The codes below belong to this page’s input validation, calculation transport, and algebraic checks. The white-box program has none. It cannot tell that it is being traced, it cannot refuse to run, and it raises nothing while its key is being extracted — a table network has no way to notice. The absence is the exhibit, not an omission.',
         ]),
         scroller(
           'Failure codes',
@@ -333,6 +356,10 @@ function scopeSection(): HTMLElement {
                 {
                   text: 'the algebraic attack, refusing a round, a column or a table set it cannot work on',
                 },
+              ]),
+              ...TRANSPORT_FAILURE_CODES.map((code): Cell[] => [
+                { text: code, cls: 'mono' },
+                { text: 'this page, when the calculation worker is unavailable; reload to retry' },
               ]),
               [
                 { text: '(none)', cls: 'mono' },
@@ -473,14 +500,48 @@ function randomKeyHex(): string {
   return [...crypto.getRandomValues(new Uint8Array(16))].map(byteHex).join('');
 }
 
+function erasePlot(canvas: HTMLCanvasElement): void {
+  canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function retireRecovery(reason: string): void {
+  if (state.dca) state.retired = { traces: state.trace?.traces ?? 0, attacked: true, reason };
+  state.dca = null;
+  inspectorEpoch++;
+  dcaStatus.textContent = '';
+  renderDca(null);
+  void renderFixture();
+}
+
+function retireTrace(reason: string): void {
+  if (state.trace || state.dca) state.retired = {
+    traces: state.trace?.traces ?? 0, attacked: state.dca !== null, reason,
+  };
+  retireRecovery(reason);
+  state.trace = null;
+  traceStatus.textContent = '';
+  renderTrace(null);
+}
+
+function retireBuild(reason: string): void {
+  retireTrace(reason);
+  state.build = null;
+  state.bge = null;
+  programFingerprint = null;
+  buildStatus.textContent = '';
+  bgeStatus.textContent = '';
+  renderBuild(null);
+  renderBge(null);
+  void renderFixture();
+}
+
 async function runBuild(): Promise<void> {
+  retireBuild('the key, seed or program build changed');
   keyError.textContent = '';
   keyInput.removeAttribute('aria-invalid');
   buildStatus.textContent = 'Building…';
   setBusy(true);
   try {
-    const hadTraces = state.trace?.traces ?? 0;
-    const hadAttack = state.dca !== null;
     const report = await ask<BuildReport & { id: number }>(
       {
         kind: 'build',
@@ -493,17 +554,7 @@ async function runBuild(): Promise<void> {
       },
     );
     state.build = report;
-    // Only overwrite the note when this build actually retired something. A
-    // second build in a row retires nothing, and blanking the note there would
-    // make the first one's verdict disappear silently after all -- which is the
-    // exact failure mode saying "retired" exists to prevent.
-    if (hadTraces > 0 || hadAttack) {
-      state.retired = {
-        traces: hadTraces,
-        attacked: hadAttack,
-        reason: 'the program was rebuilt, so a different table network is in memory now',
-      };
-    }
+    programFingerprint = state.seed ? JSON.stringify([keyInput.value.replace(/\s+/g, '').toLowerCase(), state.seed]) : null;
     state.trace = null;
     state.dca = null;
     state.bge = null;
@@ -537,10 +588,10 @@ function renderBuild(report: BuildReport | null): void {
     return;
   }
   const v = report.verification;
-  const ok = v.fipsVectorMatches && v.randomBlocksMatching === v.randomBlocks;
+  const ok = verificationPassed(v);
   buildOut.append(
     el('div', { class: 'verdict-row', id: 'build-verdict' }, [
-      verdict(ok ? 'ok' : 'alarm', ok ? 'IT IS AES-128' : 'IT IS NOT AES-128', {
+      verdict(ok ? 'ok' : 'alarm', ok ? 'IT IS AES-128' : 'AES CHECKS FAILED OR INCOMPLETE', {
         'data-check': ok ? 'pass' : 'fail',
       }),
       el('span', { class: 'verdict-detail' }, [
@@ -550,7 +601,7 @@ function renderBuild(report: BuildReport | null): void {
             } on ${v.randomBlocksMatching} of ${v.randomBlocks} random blocks, and reproduces the FIPS 197 (2001) Appendix C.1 vector.`
           : `Only ${v.randomBlocksMatching} of ${v.randomBlocks} random blocks matched, and the FIPS vector ${
               v.fipsVectorMatches ? 'did' : 'did not'
-            } reproduce. Something in the network is wrong.`,
+            } reproduce. This run requires all eight random comparisons and the named FIPS ciphertext.`,
       ]),
     ]),
     definitionList([
@@ -693,7 +744,8 @@ const traceError = el('p', {
 
 function syncTraceInputs(from: 'range' | 'number'): void {
   const raw = Number(from === 'range' ? traceRange.value : traceNumber.value);
-  state.traces = Number.isFinite(raw) ? Math.round(raw) : DEFAULT_TRACES;
+  state.traces = raw;
+  retireTrace('the requested trace count changed');
   if (from === 'number') {
     traceRange.value = String(Math.max(MIN_TRACES, Math.min(MAX_TRACES, state.traces)));
   } else {
@@ -706,6 +758,7 @@ traceNumber.addEventListener('input', () => syncTraceInputs('number'));
 async function runTrace(): Promise<void> {
   traceError.textContent = '';
   traceNumber.removeAttribute('aria-invalid');
+  retireTrace('a new trace recording was requested');
   if (!state.build) {
     traceError.textContent = 'NO_PROGRAM_BUILT — build the program first: the trace is of its table lookups.';
     return;
@@ -756,7 +809,7 @@ function renderTrace(report: TraceReport | null): void {
         el('div', { class: 'verdict-row', id: 'trace-retired', 'data-retired': 'trace' }, [
           verdict('warn', 'RETIRED'),
           el('span', { class: 'verdict-detail' }, [
-            `The ${count(state.retired.traces)} traces that were here described a different program: ${state.retired.reason}. Record new ones.`,
+            `The ${count(state.retired.traces)} traces that were here belonged to an earlier calculation: ${state.retired.reason}. Record new ones.`,
           ]),
         ]),
       );
@@ -764,6 +817,8 @@ function renderTrace(report: TraceReport | null): void {
       traceOut.append(el('p', { class: 'placeholder' }, ['No traces recorded. Press "Trace it".']));
     }
     traceFigure.describe('No traces recorded yet.');
+    erasePlot(traceFigure.canvas);
+    erasePlot(focusFigure.canvas);
     return;
   }
   traceOut.append(
@@ -874,6 +929,7 @@ const bitSelect = select(
   'all',
   (value) => {
     state.bitChoice = value === 'all' ? 'all' : Number(value);
+    retireRecovery('the prediction bits changed');
   },
 );
 const distinguisherSelect = select(
@@ -885,6 +941,7 @@ const distinguisherSelect = select(
   'peak',
   (value) => {
     state.distinguisher = value as Distinguisher;
+    retireRecovery('the scoring rule changed');
   },
 );
 
@@ -894,7 +951,7 @@ const byteSelect = select(
   '0',
   (value) => {
     state.inspectByte = Number(value);
-    void refreshInspector();
+    void refreshInspector().catch((error: Error) => { dcaError.textContent = error.message; });
   },
 );
 const guessSelect = select(
@@ -906,7 +963,7 @@ const guessSelect = select(
   'recovered',
   (value) => {
     state.inspectGuess = value as 'recovered' | 'wrong';
-    void refreshInspector();
+    void refreshInspector().catch((error: Error) => { dcaError.textContent = error.message; });
   },
 );
 
@@ -915,6 +972,7 @@ function renderTargetChecks(): void {
   if (state.surface === 'input') {
     targetChecks.append(
       checkbox('target-sbox', 'SubBytes output, S(p ⊕ k)', state.inputTargets.includes('sbox-output'), (on) => {
+        retireRecovery('the prediction targets changed');
         state.inputTargets = on
           ? [...new Set<DcaTarget>([...state.inputTargets, 'sbox-output'])]
           : state.inputTargets.filter((t) => t !== 'sbox-output');
@@ -924,6 +982,7 @@ function renderTargetChecks(): void {
         'Multiplicative inverse inside SubBytes, (p ⊕ k)⁻¹',
         state.inputTargets.includes('inverse'),
         (on) => {
+          retireRecovery('the prediction targets changed');
           state.inputTargets = on
             ? [...new Set<DcaTarget>([...state.inputTargets, 'inverse'])]
             : state.inputTargets.filter((t) => t !== 'inverse');
@@ -949,8 +1008,14 @@ function wrongGuessFor(chosen: number): number {
 }
 
 async function refreshHeatmap(): Promise<void> {
+  const epoch = ++inspectorEpoch;
+  const trace = state.trace;
+  const attack = state.dca;
+  const current = (): boolean => epoch === inspectorEpoch && trace === state.trace && attack === state.dca;
   if (!state.trace) {
     traceFigure.describe('No traces recorded yet.');
+    erasePlot(traceFigure.canvas);
+    erasePlot(focusFigure.canvas);
     return;
   }
   // Act 3 shows the WHOLE recording, with the round boundaries marked from the
@@ -963,6 +1028,7 @@ async function refreshHeatmap(): Promise<void> {
     maxRows: 200,
     focusHalfWidth: 0,
   });
+  if (!current()) return;
   traceFigure.describe(
     drawTraceHeatmap(
       traceFigure.canvas,
@@ -1001,7 +1067,7 @@ async function refreshHeatmap(): Promise<void> {
     maxRows: 96,
     focusHalfWidth: 8,
   });
-  focusFigure.describe(drawFocusHeatmap(focusFigure.canvas, strip, focusSample));
+  if (current()) focusFigure.describe(drawFocusHeatmap(focusFigure.canvas, strip, focusSample));
 }
 
 async function refreshInspector(): Promise<void> {
@@ -1014,6 +1080,7 @@ async function refreshInspector(): Promise<void> {
 
 async function runDcaAttack(): Promise<void> {
   dcaError.textContent = '';
+  retireRecovery('a new attack was requested');
   if (!state.trace) {
     dcaError.textContent = 'NO_TRACES_RECORDED — record some traces first: DCA is a statistical attack on them.';
     return;
@@ -1050,7 +1117,7 @@ async function runDcaAttack(): Promise<void> {
     byteSelect.value = String(best);
     state.runs.dca += 1;
     dcaStatus.textContent = `Attack #${state.runs.dca}: scored ${count(
-      256 * 16 * targets.length * bitsSelected().length,
+      256 * 16 * report.targets.length * report.bits.length,
     )} hypothesis evaluations in ${report.elapsedMs} ms.`;
     // A recovery counts as done when it HAPPENS. A later run against a
     // defended placement does not undo it.
@@ -1061,7 +1128,7 @@ async function runDcaAttack(): Promise<void> {
     await refreshInspector();
     curvesFigure.describe(drawCurves(curvesFigure.canvas, report));
     renderLog();
-    renderFixture();
+    await renderFixture(true);
     renderGuide();
   } catch (error) {
     const err = error as Error & { code?: string };
@@ -1143,7 +1210,7 @@ function renderDca(report: DcaReport | null): void {
         el('div', { class: 'verdict-row', id: 'dca-retired', 'data-retired': 'dca' }, [
           verdict('warn', 'RETIRED'),
           el('span', { class: 'verdict-detail' }, [
-            `The recovery that was here was of a different key, from a different program: ${state.retired.reason}. Trace again and re-run the attack.`,
+            `The recovery that was here belonged to an earlier calculation: ${state.retired.reason}. Trace again and re-run the attack.`,
           ]),
         ]),
       );
@@ -1153,6 +1220,7 @@ function renderDca(report: DcaReport | null): void {
     byteStrip.append(el('span', { class: 'placeholder', role: 'listitem' }, ['—']));
     peaksFigure.describe('No attack has run yet.');
     curvesFigure.describe('No attack has run yet.');
+    for (const canvas of [peaksFigure.canvas, curvesFigure.canvas, focusFigure.canvas]) erasePlot(canvas);
     return;
   }
   const head = headlineFor(report);
@@ -1243,7 +1311,7 @@ function renderDca(report: DcaReport | null): void {
       el('div', {}, [
         el('h4', {}, ['The same traces, split by the predicted bit']),
         el('p', {}, [
-          'The rows above the gap are the traces whose predicted bit is 0 and the rows below are the ones where it is 1. Beneath them, the bar pairs are the fraction of 1 bits in each half at each sample \u2014 the difference of means itself, not a picture of it. Under the value the attack chose, one pair pulls apart. Under a deliberately wrong value every pair stays level. That is the whole attack.',
+          'The rows above the gap are the traces whose predicted bit is 0 and the rows below are the ones where it is 1. Beneath them, the bar pairs are the fraction of 1 bits in each half at each sample \u2014 the difference of means itself, not a picture of it. Under the value the attack chose, one pair pulls apart. A deliberately wrong value can also show unequal means from sampling noise or correlations. Compare the measured differences; a visible peak alone does not prove a key guess correct.',
         ]),
         focusFigure.wrap,
       ]),
@@ -1295,6 +1363,7 @@ function renderDca(report: DcaReport | null): void {
       );
     }),
   );
+  syncBusyControls();
 }
 
 function dcaSection(): HTMLElement {
@@ -1324,6 +1393,7 @@ function dcaSection(): HTMLElement {
       state.surface,
       (value) => {
         state.surface = value as AttackSurface;
+        retireRecovery('the attack surface changed');
         renderTargetChecks();
       },
     ),
@@ -1391,6 +1461,10 @@ function recordLogRow(report: DcaReport): void {
     traceBits: state.build.traceBits,
     recovers: report.recovers,
     hypothesisValid: report.hypothesisValid,
+    experiment: programFingerprint,
+    bits: [...report.bits],
+    distinguisher: report.distinguisher,
+    recoveredHex: report.recoveredHex,
   };
   const existing = state.log.findIndex((r) => r.placement === row.placement && r.surface === row.surface);
   if (existing >= 0) state.log[existing] = row;
@@ -1450,57 +1524,31 @@ function renderLog(): void {
   const plain = state.log.find((r) => r.placement === 'none' && r.surface === 'input');
   const compiled = state.log.find((r) => r.placement === 'compiled-in' && r.surface === 'input');
   if (plain && compiled) {
-    /*
-     * Three outcomes, not two, because "the counts differ" and "the encoding
-     * stopped the attack" are not the same event and only the second one would
-     * contradict Bos et al. section 5.4 as this lab reproduces it.
-     *
-     * An unseeded run draws fresh plaintexts for each placement, so two runs
-     * that both recover the key can still land a byte or two apart. Reporting
-     * that as THE TWO RUNS DIFFER and stopping there invited the reader to
-     * conclude the headline claim had just failed in front of them. It had not.
-     * A seeded instance pins the plaintexts too, and then the counts are equal
-     * or something is genuinely wrong.
-     */
-    const same = plain.correctCount === compiled.correctCount;
-    const stopped = plain.correctCount >= 4 && compiled.correctCount < 4;
-    const outcome = stopped ? 'refuted' : same ? 'identical' : 'different';
-    const head = stopped
-      ? 'THE ENCODING STOPPED THE ATTACK'
-      : same
-        ? 'THE ENCODING CHANGED NOTHING'
-        : 'THE ENCODING DID NOT SAVE IT';
-    logHost.append(
-      el(
-        'div',
-        { class: 'verdict-row', id: 'compiled-in-comparison', 'data-comparison': outcome },
-        [
-          verdict(stopped ? 'ok' : 'alarm', head),
-          el('span', { class: 'verdict-detail' }, [
-            `Compiling the external encodings in grew the program from ${count(plain.tables)} tables (${bytesHuman(
-              plain.bytes,
-            )}) to ${count(compiled.tables)} tables (${bytesHuman(compiled.bytes)}) and a trace from ${count(
-              plain.traceBits,
-            )} bits to ${count(compiled.traceBits)}. The attack recovered ${plain.correctCount} bytes before and ${
-              compiled.correctCount
-            } after.` +
-              (stopped
-                ? ' That is the one result on this page that would contradict what it claims, and it is being shown rather than hidden. Re-run it with a seed before believing it: an unseeded run is a different instance each time.'
-                : same
-                  ? ''
-                  : ` The counts are not equal, and that is sampling, not protection: at ${count(
-                      plain.traces,
-                    )} traces a byte near the decision boundary can fall either way. The claim is that the encoding does not stop the attack, and on both sides of this comparison it did not. Put a seed in the instance to pin the plaintexts and the two runs become comparable byte for byte.`),
-          ]),
-        ],
-      ),
-    );
+    const matched = plain.experiment !== null && plain.experiment === compiled.experiment &&
+      plain.traces === compiled.traces && plain.distinguisher === compiled.distinguisher &&
+      JSON.stringify(plain.targets) === JSON.stringify(compiled.targets) &&
+      JSON.stringify(plain.bits) === JSON.stringify(compiled.bits);
+    const same = plain.recoveredHex === compiled.recoveredHex;
+    const outcome = !matched ? 'incomparable' : same ? 'identical' : 'different';
+    logHost.append(el('div', {
+      class: 'verdict-row', id: 'compiled-in-comparison', 'data-comparison': outcome,
+    }, [
+      verdict(matched && same ? 'alarm' : 'warn', !matched ? 'THE RUNS ARE NOT MATCHED' :
+        same ? 'THE MATCHED RUNS RECOVERED THE SAME BYTES' : 'THE MATCHED RUNS DIFFER'),
+      el('span', { class: 'verdict-detail' }, [
+        `The program grew from ${count(plain.tables)} tables (${bytesHuman(plain.bytes)}) to ${count(compiled.tables)} tables (${bytesHuman(compiled.bytes)}), and the trace grew from ${count(plain.traceBits)} to ${count(compiled.traceBits)} bits. The attack recovered ${plain.correctCount} correct bytes before and ${compiled.correctCount} after. ` +
+        (!matched ? 'Use the same key, a nonempty seed, trace count, targets, prediction bits and scorer before attributing a difference to placement. These rows remain measurements of their own runs.' :
+          same ? 'The committed guesses agree byte for byte under matched settings.' :
+          'The settings are matched but the committed guesses differ. Inspect this result; it is not automatically explained by sampling or established as protection.'),
+      ]),
+    ]));
   }
 }
 
 async function runSweep(): Promise<void> {
   const savedKey = keyInput.value;
   const savedSeed = state.seed;
+  retireBuild('the placement sweep started');
   setBusy(true);
   const plan: { placement: EncodingPlacement; surface: AttackSurface }[] = [
     { placement: 'none', surface: 'input' },
@@ -1513,7 +1561,8 @@ async function runSweep(): Promise<void> {
   ];
   // One seed across the sweep, so the AES core is identical in every state and
   // the comparison is of the placements rather than of seven random instances.
-  const sweepSeed = state.seed.length > 0 ? state.seed : `sweep-${Date.now()}`;
+  const sweepSeed = savedSeed.length > 0 ? savedSeed : `sweep-${Date.now()}`;
+  programFingerprint = JSON.stringify([savedKey.replace(/\s+/g, '').toLowerCase(), sweepSeed]);
   try {
     let built: EncodingPlacement | null = null;
     for (let step = 0; step < plan.length; step++) {
@@ -1550,6 +1599,16 @@ async function runSweep(): Promise<void> {
     sweepStatus.textContent = `Measured all ${plan.length} combinations at ${count(state.traces)} traces, seed "${sweepSeed}".`;
     // Leave the page on the state that carries the negative claim.
     state.placement = 'remote-both';
+    state.seed = sweepSeed;
+    seedInput.value = sweepSeed;
+    state.surface = 'input';
+    state.inputTargets = ['sbox-output', 'inverse'];
+    state.bitChoice = 'all';
+    state.distinguisher = 'peak';
+    bitSelect.value = 'all';
+    distinguisherSelect.value = 'peak';
+    for (const input of document.querySelectorAll<HTMLInputElement>('input[name="surface"]')) input.checked = input.value === 'input';
+    renderTargetChecks();
     for (const input of document.querySelectorAll<HTMLInputElement>('input[name="placement"]')) {
       input.checked = input.value === 'remote-both';
     }
@@ -1576,12 +1635,11 @@ async function runSweep(): Promise<void> {
     renderDca(state.dca);
     await refreshInspector();
     curvesFigure.describe(drawCurves(curvesFigure.canvas, state.dca));
-    await renderFixture();
+    await renderFixture(true);
     renderGuide();
   } catch (error) {
     sweepStatus.textContent = `The sweep stopped: ${(error as Error).message}`;
   } finally {
-    state.seed = savedSeed;
     setBusy(false);
   }
 }
@@ -1595,7 +1653,7 @@ async function runSweep(): Promise<void> {
  * and the same tables give their encodings up to an algebraic attack that used
  * no traces at all, which is run here, in that state, to make the claim a result.
  */
-async function renderFixture(): Promise<void> {
+async function renderFixture(computeBge = false): Promise<void> {
   clear(fixtureHost);
   const build = state.build;
   const dca = state.dca;
@@ -1610,20 +1668,21 @@ async function renderFixture(): Promise<void> {
   if (dca.correctCount > 2) {
     fixtureHost.append(
       el('p', { class: 'aside-note' }, [
-        `In this run the attack recovered ${dca.correctCount} of 16 bytes with the encodings held remotely on both sides. That is not the state the negative claim describes, and it would mean a leak across the module boundary rather than luck. The claim is not shown for a state it is not about.`,
+        `In this run the attack recovered ${dca.correctCount} of 16 bytes with the encodings held remotely on both sides. That is not the state the negative claim describes, so it needs a repeated measurement and an inspection of the information boundary; this one result alone does not establish a leak. The claim is not shown for a state it is not about.`,
       ]),
     );
     return;
   }
 
   let bge: BgeReport | null = state.bge;
-  if (!bge) {
+  if (!bge && computeBge) {
     try {
       bge = await ask<BgeReport & { id: number }>({
         kind: 'bge',
         round: state.bgeRound,
         column: state.bgeColumn,
       });
+      if (build !== state.build || dca !== state.dca) return;
       state.bge = bge;
       renderBge(bge);
     } catch {
@@ -1634,15 +1693,13 @@ async function renderFixture(): Promise<void> {
   const checks: { label: string; pass: boolean; detail: string }[] = [
     {
       label: 'The program is a correct AES-128',
-      pass:
-        build.verification.fipsVectorMatches &&
-        build.verification.randomBlocksMatching === build.verification.randomBlocks,
+      pass: verificationPassed(build.verification),
       detail: `${build.verification.randomBlocksMatching} of ${build.verification.randomBlocks} random blocks agree with ${
         build.verification.webCryptoAvailable ? 'WebCrypto' : 'the reference'
-      }, and the FIPS 197 vector reproduces.`,
+      }, and the FIPS 197 vector ${build.verification.fipsVectorMatches ? 'matched' : 'did not match'}.`,
     },
     {
-      label: 'Differential computation analysis recovered nothing',
+      label: 'Differential computation analysis did not recover the full key',
       pass: dca.correctCount <= 2,
       detail: `${dca.correctCount} of 16 bytes, against ${dca.chanceCorrect.toFixed(2)} expected from blind guessing, over ${count(
         dca.traces,
@@ -1661,11 +1718,12 @@ async function renderFixture(): Promise<void> {
     },
   ];
   const allGreen = checks.every((c) => c.pass);
+  const reached = allGreen && bgePassed(bge);
 
   fixtureHost.append(
     el('div', { class: 'verdict-row' }, [
-      verdict(allGreen ? 'warn' : 'ok', 'DCA DEFEATED — AND THE ENCODINGS RECOVERED ANYWAY', {
-        'data-fixture-verdict': allGreen ? 'reached' : 'incomplete',
+      verdict(reached ? 'warn' : 'alarm', reached ? 'DCA DEFEATED — AND THE ENCODINGS RECOVERED ANYWAY' : 'THE COMPLETE RESULT HAS NOT BEEN ESTABLISHED', {
+        'data-fixture-verdict': reached ? 'reached' : 'incomplete',
       }),
     ]),
     el(
@@ -1686,7 +1744,7 @@ async function renderFixture(): Promise<void> {
       ),
     ),
     el('p', { class: 'fixture-turn' }, [
-      'Every check above says the defence held. Here is the same program’s tables, read by an attack that never ran it:',
+      allGreen ? 'The four checks above held. The algebraic result from the same program’s tables is reported below:' : 'At least one check above failed or was incomplete. This run does not establish the claimed result.',
     ]),
   );
   if (bge) {
@@ -1694,7 +1752,7 @@ async function renderFixture(): Promise<void> {
       definitionList([
         [
           'BGE step A1 on round ' + bge.round + ', column ' + bge.column,
-          bge.stripped
+          bgePassed(bge)
             ? `stripped all four output encodings to a GF(2)-affine map, in ${bge.elapsedMs} ms, using ${count(
                 bge.evaluations,
               )} table evaluations and zero traces`
@@ -1712,7 +1770,7 @@ async function renderFixture(): Promise<void> {
     fixtureHost.append(el('p', { class: 'aside-note' }, ['The algebraic step could not be run on these tables.']));
   }
   fixtureHost.append(
-    negClaim('fixture'),
+    ...(reached ? [negClaim('fixture')] : []),
     el('p', { class: 'aside-note' }, [
       'And the honest other half, which the paper states too. Section 6 lists external encodings as a potential countermeasure and says they were "the primary reason why we were not able to extract the secret key from the challenge described in Section 5.5" — then immediately: "However, typically the adversary can obtain knowledge related to the external encoding applied when he observes the behavior of the white-box implementation in the entire software-framework where it is used". The problem moves rather than dissolving. Something outside the program now holds F and G and applies them to every block, and that something is another piece of software, on some machine, with a secret in it.',
     ]),
@@ -1758,7 +1816,7 @@ function placementSection(): HTMLElement {
           'And one corroboration that was not aimed for. Their first-round traces come to 832 kbits over 500 runs — 1,664 bits per trace. This lab records 1,792 bits for its own first round. Two independent implementations of the same construction, recording the same round, within eight per cent of each other.',
         ]),
         el('p', {}, [
-          'One result on this page is neither: attacking the OUTPUT side recovers only part of the last round key, and the part it recovers does not complete. The reason is structural and worth knowing. Chow’s first-round tables are 8 → 32, so a first-round key byte is exposed through eight encoded nibbles; his round-10 tables are 8 → 8, so a last-round key byte is exposed through two. Four times fewer places for a correlation to be. And inverting the AES-128 key schedule needs all sixteen bytes of k¹⁰, so a partial recovery of it yields nothing about the key.',
+          'One result on this page is neither: attacking the OUTPUT side recovers only part of the last round key, and the part it recovers does not complete. The reason is structural and worth knowing. Chow’s first-round tables are 8 → 32, so a first-round key byte is exposed through eight encoded nibbles; his round-10 tables are 8 → 8, so a last-round key byte is exposed through two. Four times fewer places for a correlation to be. And inverting the AES-128 key schedule needs all sixteen bytes of k¹⁰, so this page does not recover a complete AES key from a partial result. Correct last-round bytes still constrain the key and are not zero information.',
         ]),
       );
     }),
@@ -1788,6 +1846,9 @@ const roundSelect = select(
   '1',
   (value) => {
     state.bgeRound = Number(value);
+    state.bge = null;
+    renderBge(null);
+    void renderFixture();
   },
 );
 const columnSelect = select(
@@ -1796,11 +1857,17 @@ const columnSelect = select(
   '0',
   (value) => {
     state.bgeColumn = Number(value);
+    state.bge = null;
+    renderBge(null);
+    void renderFixture();
   },
 );
 
 async function runBge(): Promise<void> {
   bgeError.textContent = '';
+  state.bge = null;
+  renderBge(null);
+  void renderFixture();
   if (!state.build) {
     bgeError.textContent = 'NO_PROGRAM_BUILT — build the program first: this attack reads its tables.';
     return;
@@ -1815,9 +1882,10 @@ async function runBge(): Promise<void> {
     });
     state.bge = report;
     state.runs.bge += 1;
-    state.stagesDone.tables = true;
+    if (bgePassed(report)) state.stagesDone.tables = true;
     bgeStatus.textContent = `Step A1 #${state.runs.bge} finished in ${report.elapsedMs} ms.`;
     renderBge(report);
+    await renderFixture();
     renderGuide();
   } catch (error) {
     const err = error as Error & { code?: string };
@@ -1825,6 +1893,7 @@ async function runBge(): Promise<void> {
     bgeStatus.textContent = '';
     bgeError.textContent = `${err.code ?? 'ERROR'} — ${err.message}`;
     renderBge(null);
+    await renderFixture();
   } finally {
     setBusy(false);
   }
@@ -1839,11 +1908,11 @@ function renderBge(report: BgeReport | null): void {
   bgeOut.append(
     el(
       'div',
-      { class: 'verdict-row', id: 'bge-verdict', 'data-bge-verdict': report.stripped ? 'stripped' : 'incomplete' },
+      { class: 'verdict-row', id: 'bge-verdict', 'data-bge-verdict': bgePassed(report) ? 'stripped' : 'incomplete' },
       [
         verdict(
-          report.stripped ? 'alarm' : 'warn',
-          report.stripped ? 'ENCODINGS STRIPPED TO AFFINE' : 'STEP A1 DID NOT COMPLETE',
+          bgePassed(report) ? 'alarm' : 'warn',
+          bgePassed(report) ? 'ENCODINGS STRIPPED TO AFFINE' : 'STEP A1 DID NOT COMPLETE',
         ),
         el('span', { class: 'verdict-detail' }, [
           `Round ${report.round}, column ${report.column}. ${count(report.evaluations)} column evaluations, ${
@@ -2015,11 +2084,14 @@ let busyDepth = 0;
 function setBusy(busy: boolean): void {
   busyDepth = Math.max(0, busyDepth + (busy ? 1 : -1));
   const running = busyDepth > 0;
-  for (const id of ['build', 'generate-key', 'trace', 'run-dca', 'run-bge', 'sweep']) {
-    const node = document.getElementById(id);
-    if (node instanceof HTMLButtonElement) node.disabled = running;
-  }
+  syncBusyControls();
   document.documentElement.toggleAttribute('data-busy', running);
+}
+
+function syncBusyControls(): void {
+  for (const node of main.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input, select, button')) {
+    node.disabled = busyDepth > 0;
+  }
 }
 
 // ── the state-aware next action ─────────────────────────────────────────────
@@ -2266,6 +2338,7 @@ function renderGuide(): void {
       }),
     );
   }
+  syncBusyControls();
 }
 
 function guideSection(): HTMLElement {
@@ -2364,8 +2437,9 @@ function trackActiveAct(): void {
 // its temporal dead zone and the whole page fails to render.
 app.insertBefore(actNav(), main);
 
-seedInput.addEventListener('change', () => {
+seedInput.addEventListener('input', () => {
   state.seed = seedInput.value.trim();
+  retireBuild('the encoding seed changed');
 });
 
 main.append(
@@ -2390,6 +2464,7 @@ app.append(
 keyInput.addEventListener('input', () => {
   // A key the reader typed is theirs, and does not travel in a share link.
   state.keyOrigin = 'typed';
+  retireBuild('the key field changed');
 });
 
 renderTargetChecks();

@@ -279,7 +279,7 @@ function inventoryOf(network: {
   const bytes = groups.reduce((n, g) => n + g.bytes, 0);
   // The literature stores two 4-bit entries per byte. Reported beside the
   // allocated figure so neither number has to be taken on trust.
-  const packedBytes = groups.reduce((n, g) => n + (g.entryBytes === 256 ? g.bytes / 2 : g.bytes), 0);
+  const packedBytes = groups.reduce((n, g) => n + (g.id === 'type-iv' || g.id === 'type-iv-ext' ? g.bytes / 2 : g.bytes), 0);
   return { groups, tables, bytes, packedBytes };
 }
 

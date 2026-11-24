@@ -11,11 +11,12 @@
  * WHY IT WORKS AT ALL, which is the thing worth getting right. Chow's internal
  * encodings are concatenations of 4-bit bijections. A sample in the trace is one
  * bit of f(v), where f is a secret 4-bit bijection and v is a nibble of a
- * GF(2)-linear image of S(x ^ k). A 4-bit bijection cannot make all four output
- * bits statistically independent of all four input bits, so for some (prediction
- * bit, sample bit) pairs the correlation is non-zero -- and a difference of means
- * over a few hundred traces finds it. DCA succeeds THROUGH Chow's encodings, not
- * because they are absent.
+ * GF(2)-linear image of S(x ^ k). The random encodings in the measured instances
+ * leave correlations that a difference of means can detect. This is not a
+ * theorem that every nibble bijection exposes a single input bit: an invertible
+ * linear map whose rows all have weight at least two is a counterexample under
+ * uniform input. Recovery depends on the whole construction, targets and sample.
+ * DCA succeeds through the measured encodings, not because they are absent.
  *
  * And what that does NOT license: "4 bits leak, 8 bits are safe" is false.
  * Rivain and Wang (TCHES 2019(2), 225-255) analysed when DCA works against
@@ -49,7 +50,7 @@ export const DCA_TARGETS: readonly DcaTarget[] = ['sbox-output', 'inverse', 'las
  * rather than being at a random position", and that the observation "can also be
  * used to recover the key". It reproduces here: on this generator 90 per cent of
  * (bit, key byte) pairs rank the true byte either first or last, where a uniform
- * distribution would put 0.4 per cent at the two extremes.
+ * distribution would put about 0.8 per cent at the two extremes (2/256).
  *
  * WHY THE TRUE BYTE SINKS TO THE BOTTOM, which is the part worth understanding.
  * For the correct guess at a bit that genuinely does not leak, the difference of

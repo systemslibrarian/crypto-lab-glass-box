@@ -48,7 +48,7 @@ assembled from the GF(2^8) multiplicative inverse and the section 5.1.1 affine m
 rather than transcribed. Chow's table network at full size: T-boxes, Ty_i tables
 for MixColumns, nibble XOR tables, random 4-bit internal encodings on every wire,
 and the 8x8 and 32x32 GF(2) mixing bijections of his section 3.2 — 2,032 tables
-and 724 KB for the plain form, 4,016 tables and 1.43 MB when the external
+and 724 KiB for the plain form, 4,016 tables and 1.43 MiB when the external
 encodings are compiled in.
 Differential computation analysis exactly as Bos, Hubain, Michiels and Teuwen
 describe it (CHES 2016): a difference of means over a software execution trace,
@@ -110,7 +110,7 @@ button for you, because causing the failure is the point.
    the key. And the mechanism itself, beside the result: the same traces split by
    the predicted bit, with the two group means drawn beneath as a pair of bars per
    sample. Under the value the attack chose, one pair pulls apart. Under a
-   deliberately wrong value, every pair stays level.
+   deliberately wrong value, differences can remain because of sampling noise and correlations; the measured plots do not prove a guess by themselves.
 
    Underneath it, **Bos et al.'s Tables 1 and 2, rebuilt on your own instance**:
    the rank of the true byte under every target and prediction bit. Their
@@ -157,7 +157,7 @@ on Chow's design; it is not the boundary of the attack family.
 
 Type a key or press Generate, press Trace it, press Run the attack, and watch
 fourteen or so of the sixteen key bytes come back. Then tick the second target and
-run it again to get the rest. Then change where the external encodings live in Act
+run it again to see whether the combined targets recover the rest on that instance. Then change where the external encodings live in Act
 2 and see which of those changes does anything. Then run Act 6, which recovers the
 encodings from the tables without running the program once.
 
@@ -176,7 +176,7 @@ gets wrong if you are not careful.**
   encoder is in the binary, the attacker can get from a plaintext they chose to
   the value the AES core sees, so the first-round hypotheses stay valid. Act 5
   measures this: the program grows, the trace grows, and the attack recovers
-  exactly the same sixteen bytes.
+  the same committed bytes under matched seeded settings. Manual rows with different keys, seeds, trace counts or attack settings are not treated as a controlled comparison.
 - **Holding the encodings outside the program stops THIS attack, and moves the
   problem.** Something out there now holds a secret and has to apply it to every
   block — another piece of software, on some machine, with a secret in it. And it
@@ -184,16 +184,15 @@ gets wrong if you are not careful.**
   its published attack covers the external encodings Chow specifies.
 - **The construction has no failure code.** It cannot tell that it is being
   traced, cannot refuse to run, and raises nothing while its key is being
-  extracted. Every failure code this page can show belongs to the page's own input
-  validation, and the scope card says so in the same table.
+  extracted. The page distinguishes its own input-validation, calculation-worker,
+  and algebraic-attack failures in the scope card's table.
 - **Even the attack's failures leak.** Bos et al. noticed that a prediction bit
   which does not leak usually ranks the true key byte *last* of the 256
   candidates rather than at random, because the correct guess is the one sitting
   at a difference of means of nearly zero while every wrong guess picks up
   spurious correlation with the known input. Act 4 rebuilds their table on your
   instance and lets you score by anomaly instead of by correlation: at 2,048
-  traces that alone recovers all sixteen bytes on this generator. There is no
-  setting here that produces no information.
+  traces that alone recovers all sixteen bytes on this generator. These are measured outcomes on the tested instances, not a guarantee for every setting.
 - **A confident-looking answer can still be wrong.** The margin between a byte's
   best and second-best candidate is computed without the key, so it is the
   confidence an attacker really has — and on this generator every byte above a
@@ -207,7 +206,9 @@ gets wrong if you are not careful.**
   first-round key byte is exposed through eight encoded nibbles; his round-10
   tables are 8 -> 8, so a last-round key byte is exposed through two. Four times
   fewer places for a correlation to be. And inverting the AES-128 key schedule
-  needs all sixteen bytes of k^10, so a partial recovery of it yields nothing.
+  needs all sixteen bytes of k^10 in this implementation, so this page does not
+  derive a complete AES key from a partial result. Correct last-round bytes still
+  constrain the key.
 - **What this page's trace is not.** Real DCA captures the same kind of data from
   a foreign binary with dynamic binary instrumentation — Intel PIN, Valgrind, a
   debugger — which a browser cannot run. This page records the output of every
@@ -313,15 +314,33 @@ the Appendix B cipher example appear in both editions.
 
 ## Build & Verify
 
-**171 tests, all executed, none skipped.**
+**190 tests in the required unit, rendered-claim and accessibility gates.**
 
-- **121 unit tests** (Vitest, `src/**/*.test.ts`).
-- **47 claims tests** (Playwright, `e2e/claims.spec.ts`) — checking that the page
+- **129 unit tests** (Vitest, `src/**/*.test.ts`).
+- **58 claims tests** (Playwright, `e2e/claims.spec.ts` and `e2e/student-review.claims.spec.ts`) — checking that the page
   tells the truth, by comparing values the page itself printed and re-deriving its
   claims from what is on screen.
 - **3 accessibility tests** (Playwright + `@axe-core/playwright`,
   `e2e/a11y.spec.ts`) — the WCAG 2.1 A/AA gate, driven through thirty-odd states
   at 1280, 380 and 280 CSS pixels.
+
+**Student-evidence regressions (2026-11-24).** Failed or replaced calculations
+retire dependent results; settings stay fixed during a calculation, and worker
+failure ends pending progress with a reload instruction. A complete AES verdict
+requires the FIPS value and all eight independent random-block checks. The
+algebraic fixture requires four distinct recovered output-byte maps and the full
+65,536-evaluation report before it can claim the encodings were recovered.
+Placement comparisons require the same key, nonempty seed, trace count, targets,
+bits and scorer; an unseeded sweep retains its generated seed. Fractional trace
+counts are refused rather than rounded. Table-size accounting packs only nibble
+outputs: the plain form is 508 KiB when packed, retaining all 4,096 bytes of the
+Type V byte-output tables (Muir, section 4.4). Displayed binary sizes use KiB/MiB.
+Independent review calculations matched 1,000 AES blocks through OpenSSL across
+all five placements, 11 seed/CTR checks including Unicode boundaries, 16,384 DCA
+scores computed by direct means in Python, and the affine law for all 65,536
+input pairs in each of 20 recovered BGE byte maps. These checks concern the
+implemented construction and measured instances; they do not establish security
+of other white-box designs.
 
 **Known-answer tests, from the specifications:**
 
@@ -398,8 +417,8 @@ the page stays responsive and reports progress while it happens.
 
 | Step | Cost |
 |---|---|
-| Build a plain program: 2,032 tables, 724 KB | ~110 ms |
-| Build with the external encodings compiled in: 4,016 tables, 1.43 MB | ~215 ms |
+| Build a plain program: 2,032 tables, 724 KiB | ~110 ms |
+| Build with the external encodings compiled in: 4,016 tables, 1.43 MiB | ~215 ms |
 | 384 traced encryptions, 16,256 samples recorded each | ~40 ms |
 | DCA, one target, all eight prediction bits: 32,768 hypothesis evaluations | ~0.95 s |
 | DCA, both targets combined: 65,536 hypothesis evaluations | ~2.1 s |
@@ -414,7 +433,7 @@ rather than a pass over the traces. The binding constraint is the trace buffer,
 which is one bit per sample per trace — and how many samples a trace has depends
 on how big the program is, so the same trace count costs twice as much with the
 external encodings compiled in as without them. The page computes the size before
-allocating anything and refuses over 7 MB by name, which the compiled-in
+allocating anything and refuses over 7 MiB by name, which the compiled-in
 placement reaches first, at about 1,800 traces where the others reach 2,048.
 
 ---

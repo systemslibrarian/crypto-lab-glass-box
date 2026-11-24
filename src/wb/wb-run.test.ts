@@ -164,9 +164,11 @@ describe('the table inventory is computed, not asserted', () => {
 
   it('the packed total is smaller than the allocated total, by the 4-bit tables', () => {
     const { network } = buildNetwork(new Uint8Array(16), 'none', seededRng('packed'));
-    const { bytes, packedBytes, groups } = network.inventory;
-    const nibbleBytes = groups.filter((g) => g.entryBytes === 256).reduce((n, g) => n + g.bytes, 0);
-    expect(packedBytes).toBe(bytes - nibbleBytes / 2);
+    const { bytes, packedBytes } = network.inventory;
+    // Muir, section 4.4: 288 word tables, 1,728 nibble tables and 16 byte tables.
+    // Type V has 256 byte-valued entries; its 4,096 bytes cannot be halved.
+    expect(packedBytes).toBe(288 * 1024 + 1728 * 128 + 16 * 256);
+    expect(packedBytes).toBe(508 * 1024);
     expect(packedBytes).toBeLessThan(bytes);
   });
 });

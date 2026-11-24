@@ -156,7 +156,7 @@ test.describe('Act 2: what the page says it built', () => {
         const [, tablesText, eachText, bytesText] = cells;
         const n = number(tablesText);
         const each = number(eachText);
-        const total = /MB/.test(bytesText) ? number(bytesText) * 1048576 : number(bytesText) * 1024;
+        const total = /MiB/.test(bytesText) ? number(bytesText) * 1048576 : number(bytesText) * 1024;
         // The row is internally consistent: tables x bytes-each = bytes.
         expect(Math.abs(n * each - total), `${placement} row ${i}`).toBeLessThan(total * 0.005 + 1);
         tables += n;
@@ -165,7 +165,7 @@ test.describe('Act 2: what the page says it built', () => {
       // ...and the rows sum to the two headline figures beside them.
       expect(number(await definition(page, '#build-out', 'Tables in the program')), placement).toBe(tables);
       const printed = await definition(page, '#build-out', 'Program size, as allocated here');
-      const printedBytes = /MB/.test(printed) ? number(printed) * 1048576 : number(printed) * 1024;
+      const printedBytes = /MiB/.test(printed) ? number(printed) * 1048576 : number(printed) * 1024;
       expect(Math.abs(printedBytes - bytes), placement).toBeLessThan(bytes * 0.005 + 1);
     }
   });
@@ -275,7 +275,7 @@ test.describe('Act 3: the recording', () => {
     await build(page, 'none');
     await trace(page, 128);
     const line = await definition(page, '#trace-out', 'Buffer size');
-    const sizes = line.match(/[\d.]+ KB|[\d.]+ MB/g) ?? [];
+    const sizes = line.match(/[\d.]+ KiB|[\d.]+ MiB/g) ?? [];
     expect(sizes, line).toHaveLength(2);
     const allocated = sizes[0] ?? '';
     // The prediction was made before anything was allocated; they must agree.
@@ -285,7 +285,7 @@ test.describe('Act 3: the recording', () => {
     const bits = number(await definition(page, '#trace-out', 'Samples per trace'));
     const traces = number(await definition(page, '#trace-out', 'Traced encryptions'));
     const expectedBytes = bits * Math.ceil(traces / 32) * 4 + traces * 32;
-    const printed = number(allocated) * (/MB/.test(allocated) ? 1048576 : 1024);
+    const printed = number(allocated) * (/MiB/.test(allocated) ? 1048576 : 1024);
     expect(Math.abs(printed - expectedBytes)).toBeLessThan(expectedBytes * 0.01 + 1);
   });
 });
@@ -424,7 +424,7 @@ test.describe('Act 5: where the encodings live, measured', () => {
     expect(plainScore).toBeGreaterThanOrEqual(14);
     // The page says so itself, from the rows it logged.
     await expect(page.locator('#compiled-in-comparison')).toHaveAttribute('data-comparison', 'identical');
-    await expect(page.locator('#compiled-in-comparison')).toContainText('THE ENCODING CHANGED NOTHING');
+    await expect(page.locator('#compiled-in-comparison')).toContainText('THE MATCHED RUNS RECOVERED THE SAME BYTES');
   });
 
   test('a remote OUTPUT encoding leaves the input side wide open', async ({ page }) => {
@@ -672,7 +672,7 @@ test.describe('failure paths: the page names the actual cause', () => {
     await page.fill('#traces', '2048');
     await page.locator('#trace').click();
     await expect(page.locator('#trace-error')).toContainText('TRACE_BUDGET_EXCEEDED');
-    await expect(page.locator('#trace-error')).toContainText('7 MB budget');
+    await expect(page.locator('#trace-error')).toContainText('7 MiB budget');
     await expect(page.locator('#trace-error')).toContainText('computed before anything is allocated');
     await expect(page.locator('#traces')).toHaveAttribute('aria-invalid', 'true');
 
@@ -1056,9 +1056,9 @@ test.describe('retirement and the no-op guard', () => {
     await expect(page.locator('#trace-out table.matrix')).toHaveCount(0);
     // ...and the page says they were retired, rather than blanking silently.
     await expect(page.locator('#trace-retired')).toHaveAttribute('data-retired', 'trace');
-    await expect(page.locator('#trace-retired')).toContainText('described a different program');
+    await expect(page.locator('#trace-retired')).toContainText('belonged to an earlier calculation');
     await expect(page.locator('#dca-retired')).toHaveAttribute('data-retired', 'dca');
-    await expect(page.locator('#dca-retired')).toContainText('a different key');
+    await expect(page.locator('#dca-retired')).toContainText('the key field changed');
   });
 
   test('re-selecting the SAME placement does not retire a fresh verdict', async ({ page }) => {
